@@ -502,7 +502,7 @@ class MainWindow(QMainWindow):
                                                iondict.loc[self.pickedfeature, 'm/z'])
         self.canvas['featureplt'].draw_idle()
         
-        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'),dtype=float,
+        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'),
                               sep=',', header=[2], index_col=[0])
         
         # Set heatmap highlight based on view
@@ -542,7 +542,7 @@ class MainWindow(QMainWindow):
             return
     
         iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0],dtype=float).iloc[:, 2:]
+        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0]).iloc[:, 2:]
         index = self.cmind[self.heatind + shift]
         name = msdata.index.tolist()[index]
     
