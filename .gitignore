@@ -1,1 +1,5 @@
 code/compoundimages/
+rawdata/*
+processeddata/*
+!rawdata/200826_PTY087I2codingdataset
+!processeddata/PTY087I2
