@@ -1,4 +1,8 @@
 code/compoundimages/
+code/__pycache__/
+code/averagepca.csv
+code/msdata_teststats_test.csv
+code/qdata.csv
 rawdata/*
 processeddata/*
 !rawdata/200826_PTY087I2codingdataset
