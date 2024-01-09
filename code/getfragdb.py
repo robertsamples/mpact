@@ -166,8 +166,6 @@ def importfrag(fragfile):
     has_parentheses = False
     while True:
         line = fragmsp.readline()
-        print(has_parentheses)
-        print(line)
 
         if not line:
             break
