@@ -838,6 +838,8 @@ class plot_PCA(ui_plot):
                             dissimilarity="precomputed", random_state=1, n_jobs=1,
                             n_init=1)
         npos = nmds.fit_transform(similarities, init=pos)
+        stress_value = nmds.stress_
+        print("NMDS stress: " +str(stress_value))
         
         pca = PCA(n_components=components)
         nmdspc = pca.fit_transform(npos)
@@ -1100,16 +1102,16 @@ def gen_upsetplt(parent):    #need to do something to handle groups with names t
     setdf = setdf.set_index(biolgroups)['size']
     
     # Plot and display the upset plot
-#    with plt.rc_context({"font.size": 8}):
-#        upsetplt = upsetplot.plot(setdf, show_counts='%d', show_percentages=True, sort_categories_by=None)
+    with plt.rc_context({"font.size": 8}):
+        upsetplt = upsetplot.plot(setdf, show_counts='%d', show_percentages=True, sort_categories_by=None)
     
-#    figup = upsetplt['matrix'].figure
-#    figup.set_size_inches(5, 4)
-#    figup.set_facecolor((0, 0, 0, 0))
-#    upsetplt['intersections'].set_facecolor((1, 1, 1, .25))
-#    figup.savefig('test_upsetplt.png', dpi=150, bbox_inches='tight')
-#    pixmap = QPixmap('test_upsetplt.png')
-#    parent.ui.label_upset.setPixmap(pixmap)                                                                     
+    figup = upsetplt['matrix'].figure
+    figup.set_size_inches(5, 4)
+    figup.set_facecolor((0, 0, 0, 0))
+    upsetplt['intersections'].set_facecolor((1, 1, 1, .25))
+    figup.savefig('test_upsetplt.png', dpi=150, bbox_inches='tight')
+    pixmap = QPixmap('test_upsetplt.png')
+    parent.ui.label_upset.setPixmap(pixmap)                                                                     
 
 def gen_treemap(parent):
     #generate treemap for visualization of filtering levels
