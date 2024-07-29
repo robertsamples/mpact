@@ -12,3 +12,461 @@ processeddata/*
 !rawdata/200826_PTY087I2codingdataset
 !processeddata/PTY087I2
 
+code/__pycache__/files.cpython-38.pyc
+code/__pycache__/files.cpython-39.pyc
+code/__pycache__/files_rc.cpython-38.pyc
+code/__pycache__/files_rc.cpython-39.pyc
+code/__pycache__/main.cpython-38.pyc
+code/__pycache__/main.cpython-39.pyc
+code/__pycache__/plotting.cpython-38.pyc
+code/__pycache__/plotting.cpython-39.pyc
+code/__pycache__/stats.cpython-39.pyc
+code/__pycache__/ui_featureinfo.cpython-38.pyc
+code/__pycache__/ui_featureinfo.cpython-39.pyc
+code/__pycache__/ui_functions.cpython-38.pyc
+code/__pycache__/ui_main.cpython-38.pyc
+code/__pycache__/ui_main.cpython-39.pyc
+code/__pycache__/ui_plotparam.cpython-39.pyc
+code/compoundimages/(+)-5(6),13-halimadiene-15-ol.png
+code/compoundimages/(+)-caryolan-1-ol.png
+code/compoundimages/(+)-discoipyrrole A.png
+code/compoundimages/(-)-7-Geranylindolactam V.png
+code/compoundimages/(-)-Neoverrucosan-5beta-ol.png
+code/compoundimages/(-)-Verrucosan-2beta-ol.png
+code/compoundimages/(1S,3aR)-jadomycin V.png
+code/compoundimages/(2E,4E)-7-methylocta-2,4-dienoic acid amide.png
+code/compoundimages/(2S,3S)-3-Hydroxy-1,4-diphenylbutan-2-yl-acetate.png
+code/compoundimages/(5R) 5-hydroxy-3-\[\[2-(4-hydroxyphenyl)ethyl\]amino\]-5-vinyl-2-cyclopenten-1-one.png
+code/compoundimages/(5S,S)-5-methyl-3-(2-methylbutyl)furan-2(5H)-one.png
+code/compoundimages/(5S,S)-5-methyl-3-(3-methylpentyl)furan-2(5H)-one.png
+code/compoundimages/(E)-12-methyltridec-3-enenitrile.png
+code/compoundimages/(E)-ethyl 8-oxooctadec-9-enoate.png
+code/compoundimages/(E)-tetradec-3-enenitrile.png
+code/compoundimages/(S)-N-tetradecanoyl-HSL.png
+code/compoundimages/(Z)-12-methyltridec-3-enenitrile.png
+code/compoundimages/(Z)-15-Methylhexadec-10-en-2-one.png
+code/compoundimages/(Z)-octadec-11-enenitrile.png
+code/compoundimages/(Z)-tetradec-3-enenitrile.png
+code/compoundimages/(Z)-tetradec-7-enenitrile.png
+code/compoundimages/-L-glutamyl-L-leucine.png
+code/compoundimages/1 '- (beta- Glucopyranosyloxy) di- O-demethylspirilloxan thin.png
+code/compoundimages/1'-beta-glucopyranosyl-3,4,3',4'-tetradehydro-1', 2'-dihydro-beta,psi-caroten-2-one.png
+code/compoundimages/1,4-dihydroxy-2,5-dimethoxy-9,10-anthraquinone.png
+code/compoundimages/1-hydroxymethylindole-3-carboxylic acid.png
+code/compoundimages/1-methyl-pseudouridine.png
+code/compoundimages/1-methylthio-2,3-di-O-(3',7',11',15'-tetramethylhexadecyl)glycerol (diphytanylglyceryl methylthioether).png
+code/compoundimages/10,15-dihydroxyamorph-4-en-3-one.png
+code/compoundimages/12-Deoxy-deoxysaxitoxin.png
+code/compoundimages/12-hydroxy-13-butoxyethoxyfumitremorgin B.png
+code/compoundimages/16-methyloxazolomycin.png
+code/compoundimages/17-Methylenespiramycin.png
+code/compoundimages/17-O-ethylnotoamide M.png
+code/compoundimages/18-methyltacrolimus.png
+code/compoundimages/2-(2-carboxyethyl)-8-hydroxyquinazolin-4(3H)-one.png
+code/compoundimages/2-(furan-2-yl)-6-(2S,3S,4-trihydroxybutyl)pyrazine.png
+code/compoundimages/2-(Heptadecyl)-3,6-dihydroxy-1,4-benzoquinone.png
+code/compoundimages/2-amino-4-methoxy-5-cyanopyrrolo\[2,3-d\]pyrimidine.png
+code/compoundimages/2-amino-6-hydroxyphenoxazin-3-one.png
+code/compoundimages/2-Demethylmonensin B.png
+code/compoundimages/2-ethyl-7-hydroxy-6,7-dihydro-5H-indolizin-3-one.png
+code/compoundimages/23-(6-methyl)heptanoic acid demalonylazalomycin F3a ester.png
+code/compoundimages/3-hydroxydehydrodaidzein.png
+code/compoundimages/3-Isobutylpropanamide-2-cyclopenten-1-one.png
+code/compoundimages/3-N-formyl- holyrine A.png
+code/compoundimages/4,5-dihydroxy-7-methylphthalide.png
+code/compoundimages/4-\[2-O-9Z-hexadecenoyl--glucopyranosyl\]-4,4-diapolycopene-4,4-dioic acid.png
+code/compoundimages/4-desmethylepothilone D.png
+code/compoundimages/4-methoxy-3H-isobenzofuran-1-one.png
+code/compoundimages/4-quinolinecarboxylic acid.png
+code/compoundimages/41-Demethylhomooligomycin B.png
+code/compoundimages/5'-deoxyguanosine.png
+code/compoundimages/5,18-dedihydroxycyclooctatin.png
+code/compoundimages/5,7,3',4'-Tetrahydroxy-8-methylisoflavon.png
+code/compoundimages/5-Hydroxy-3-(1-hydroxy-2-methylbutyl)-4-methyl-2(5H)-furanone.png
+code/compoundimages/5-hydroxydeoxyvasicinone.png
+code/compoundimages/6-acetylphenazine-1-carboxylic acid.png
+code/compoundimages/6-deoxyerythronolide B.png
+code/compoundimages/6-Hydroxysordarin.png
+code/compoundimages/7-Hydroxy-8,16-dimethyl-9-octadecenoic acid.png
+code/compoundimages/7-Tetradecenoic acid.png
+code/compoundimages/8,9-dihydrolactimidomycin.png
+code/compoundimages/8-desmethoxy-isomigrastatin.png
+code/compoundimages/8-hydroxy-8,9-dihydrolactidomycin.png
+code/compoundimages/\[D-Asp, Dhb^7\]microcystin-LR.png
+code/compoundimages/\[D-Asp3,Ser7\]MC-LR.png
+code/compoundimages/Abenquine B2.png
+code/compoundimages/Abenquine C.png
+code/compoundimages/Abyssomicin C.png
+code/compoundimages/Abyssomicin P.png
+code/compoundimages/Acidiphilamide C.png
+code/compoundimages/Actiketal.png
+code/compoundimages/Actinoallolide D.png
+code/compoundimages/Actinoramide E.png
+code/compoundimages/AHB-6-Methylneamine.png
+code/compoundimages/AI-77-F.png
+code/compoundimages/Albatrelin F.png
+code/compoundimages/Albogrisin B.png
+code/compoundimages/Albucyclone A.png
+code/compoundimages/Albumycin.png
+code/compoundimages/Aldgamycin E.png
+code/compoundimages/Aldgamycin I.png
+code/compoundimages/Aldgamycin K.png
+code/compoundimages/Alokicenone C.png
+code/compoundimages/AM-2604 A.png
+code/compoundimages/Amphibactin T.png
+code/compoundimages/Amycolatopsin C.png
+code/compoundimages/Ananstrep C.png
+code/compoundimages/AnhydroSEK4b.png
+code/compoundimages/Antarlide F.png
+code/compoundimages/Antascomicin B.png
+code/compoundimages/Antascomicin E.png
+code/compoundimages/Antillatoxin.png
+code/compoundimages/Aquayamycin.png
+code/compoundimages/Argimicin B.png
+code/compoundimages/Arthripenoid B.png
+code/compoundimages/Ashimide B.png
+code/compoundimages/Aspergilone A.png
+code/compoundimages/Asterobactin B.png
+code/compoundimages/Azicemicin A.png
+code/compoundimages/Bacillamidin G.png
+code/compoundimages/Bacilysocin.png
+code/compoundimages/Bafilomycin C2.png
+code/compoundimages/Bafilomycin G.png
+code/compoundimages/Balgacyclamide C.png
+code/compoundimages/Bananamide 2.png
+code/compoundimages/Banegasine.png
+code/compoundimages/Bartoloside H.png
+code/compoundimages/Bartoloside I.png
+code/compoundimages/BE-10988.png
+code/compoundimages/BE-14106.png
+code/compoundimages/BE-32030A.png
+code/compoundimages/Benzastatin A.png
+code/compoundimages/Biphenomycin C.png
+code/compoundimages/Biseokeaniamide A.png
+code/compoundimages/Blastmycetin C.png
+code/compoundimages/Brasilibactin A.png
+code/compoundimages/Brasiliquinone C.png
+code/compoundimages/Brintonamide A.png
+code/compoundimages/Brintonamide B.png
+code/compoundimages/Caerulomycin G.png
+code/compoundimages/Caldorin.png
+code/compoundimages/Carboxymycobactin-7.png
+code/compoundimages/Cepafungin I.png
+code/compoundimages/Cephamycin C.png
+code/compoundimages/Chaiyaphumine D.png
+code/compoundimages/Chejuenolide A.png
+code/compoundimages/Chlorotonil B.png
+code/compoundimages/Chrondamide 12D.png
+code/compoundimages/Circumdatin D.png
+code/compoundimages/Cis-7-tetradecenoyl-D-asparagine.png
+code/compoundimages/Citreamicin alpha.png
+code/compoundimages/Citreo-g-pyrone.png
+code/compoundimages/Clavirolide A.png
+code/compoundimages/Coibacin C.png
+code/compoundimages/Columbamide B.png
+code/compoundimages/Concanamycin B.png
+code/compoundimages/Conglobatin.png
+code/compoundimages/Coronafacoyl-L-isoleucine.png
+code/compoundimages/Coronatine.png
+code/compoundimages/Cosmomycin A.png
+code/compoundimages/Crocagin A.png
+code/compoundimages/Cryptophycin-16.png
+code/compoundimages/Cryptophycin-38.png
+code/compoundimages/Cyanopeptolin 920.png
+code/compoundimages/Cyclo(D)-Pro-(D)-Leu.png
+code/compoundimages/Cyclo-(L-Ala-L-Tyr).png
+code/compoundimages/Cyclodysidin D.png
+code/compoundimages/Cylindrocyclophane C2.png
+code/compoundimages/Daryamide E.png
+code/compoundimages/Defumarylhygrolidin.png
+code/compoundimages/Dehydro tilivalline.png
+code/compoundimages/Dehydroxynocardamine.png
+code/compoundimages/Demethylblasticidin S.png
+code/compoundimages/Deoxynybomycin.png
+code/compoundimages/Desferrioxamine X4.png
+code/compoundimages/Desotamide A.png
+code/compoundimages/Desotamide C.png
+code/compoundimages/Desotamide G.png
+code/compoundimages/Diaphorin.png
+code/compoundimages/Dietziamide A.png
+code/compoundimages/Dihydromaltophilin.png
+code/compoundimages/Dioxolide A.png
+code/compoundimages/Diploptene.png
+code/compoundimages/DKxanthene 574.png
+code/compoundimages/Dokdolipid B.png
+code/compoundimages/Dolastatin 10.png
+code/compoundimages/Dragonamide D.png
+code/compoundimages/Eicosanedioic acid.png
+code/compoundimages/Emericellamide A.png
+code/compoundimages/Enniatin L.png
+code/compoundimages/Enniatin M1.png
+code/compoundimages/Epohelmin B.png
+code/compoundimages/Eponemycin.png
+code/compoundimages/Epothilone D.png
+code/compoundimages/Epothilone D1.png
+code/compoundimages/Epothilone I1.png
+code/compoundimages/Erythromycin G.png
+code/compoundimages/ethyl homononactyl homononactate.png
+code/compoundimages/Etrogol.png
+code/compoundimages/Eurystatin C.png
+code/compoundimages/F-Met I.png
+code/compoundimages/Flexirubin.png
+code/compoundimages/Fluvirucin B2.png
+code/compoundimages/Fluvirucin B6.png
+code/compoundimages/Fontonamide.png
+code/compoundimages/Formicamycin D.png
+code/compoundimages/FR-66979.png
+code/compoundimages/FR-900848.png
+code/compoundimages/Frenolicin G.png
+code/compoundimages/Fumaquinone.png
+code/compoundimages/Furaquinocin B.png
+code/compoundimages/Furaquinocin D.png
+code/compoundimages/Fusaricidin D.png
+code/compoundimages/Geralcin E.png
+code/compoundimages/GGL.3.png
+code/compoundimages/Glidobactin C.png
+code/compoundimages/Gln-Asp-Val-Leu.png
+code/compoundimages/Glomecidin.png
+code/compoundimages/Glycocinnasperimicin D.png
+code/compoundimages/Gobichelin B.png
+code/compoundimages/Griselimycin.png
+code/compoundimages/Guineamide C.png
+code/compoundimages/H2-6-Hydroxymethylpterin.png
+code/compoundimages/Halstoctacosanolide B.png
+code/compoundimages/Hapalindole D.png
+code/compoundimages/Heliomycin.png
+code/compoundimages/Hexadecanenitrile.png
+code/compoundimages/Hexose-palythine-serine.png
+code/compoundimages/Homorapamycin A.png
+code/compoundimages/Hoshinolactam.png
+code/compoundimages/IC-202-A.png
+code/compoundimages/Ilanefuranone.png
+code/compoundimages/Indigoidine.png
+code/compoundimages/Indisocin.png
+code/compoundimages/Indole-3-acetic acid methyl ester.png
+code/compoundimages/Inonotusic acid.png
+code/compoundimages/Iromycin C.png
+code/compoundimages/Isobongkrekic acid,.png
+code/compoundimages/Isobutyrylvalindomycin.png
+code/compoundimages/Isomalyngamide A.png
+code/compoundimages/Isorhizopodin.png
+code/compoundimages/Isotuberculosino.png
+code/compoundimages/Izenamide B.png
+code/compoundimages/JBIR-05.png
+code/compoundimages/JBIR-80.png
+code/compoundimages/Jomthonic acid E.png
+code/compoundimages/Juglomycin I.png
+code/compoundimages/Kalafungin.png
+code/compoundimages/Kalimantacin B.png
+code/compoundimages/Kandenol A.png
+code/compoundimages/Kijimicin.png
+code/compoundimages/Koreenceine A.png
+code/compoundimages/Koreenceine B.png
+code/compoundimages/Koreenceine C.png
+code/compoundimages/Korormicin K.png
+code/compoundimages/Kribelloside A.png
+code/compoundimages/Kribelloside B.png
+code/compoundimages/L--(3-hydroxyureido)-alanine.png
+code/compoundimages/Lactoquinomycin.png
+code/compoundimages/Lagunamide B.png
+code/compoundimages/Landomycin A.png
+code/compoundimages/Landomycin S.png
+code/compoundimages/Lentzeoside E.png
+code/compoundimages/Leptofuranin D.png
+code/compoundimages/Leualacin G.png
+code/compoundimages/Leupyrrin B2.png
+code/compoundimages/Leuseramycin.png
+code/compoundimages/Lipoamide C.png
+code/compoundimages/Lipstatin.png
+code/compoundimages/Lobarialide C.png
+code/compoundimages/Lobosamide C.png
+code/compoundimages/Lodopyridone.png
+code/compoundimages/Luminmide B.png
+code/compoundimages/Lutoside.png
+code/compoundimages/Lyngbyatoxin A.png
+code/compoundimages/Maculalactone K.png
+code/compoundimages/Maculalactone M.png
+code/compoundimages/Mandelalide A.png
+code/compoundimages/Mansouramycin D.png
+code/compoundimages/Maremycin D2.png
+code/compoundimages/Marformycin D.png
+code/compoundimages/Maridomycin III.png
+code/compoundimages/Marinactinone A.png
+code/compoundimages/Marinobactin-D1.png
+code/compoundimages/Martinomycin.png
+code/compoundimages/Matlystatin A.png
+code/compoundimages/Mer-WF3010.png
+code/compoundimages/Metacridamide A.png
+code/compoundimages/methyl 1-(methyl propionate)--carboline-3-carboxylate.png
+code/compoundimages/Microginin 576.png
+code/compoundimages/Microginin 91-A.png
+code/compoundimages/Microginin FR9.png
+code/compoundimages/Microtermolide A.png
+code/compoundimages/Milbemycin 10.png
+code/compoundimages/Milbemycin 26.png
+code/compoundimages/Minutissamide J.png
+code/compoundimages/MKN-004C.png
+code/compoundimages/Mohangic acid A.png
+code/compoundimages/Mohangic acid E.png
+code/compoundimages/Monactin.png
+code/compoundimages/Mupirocin F.png
+code/compoundimages/Mutaxanthene B.png
+code/compoundimages/Mycemycin A.png
+code/compoundimages/Mycemycin E.png
+code/compoundimages/Myxochromide S3.png
+code/compoundimages/Myxopyronin B.png
+code/compoundimages/Myxotyroside B.png
+code/compoundimages/N,N'-diisobutylurea.png
+code/compoundimages/N-Acetyl-tyramine.png
+code/compoundimages/N-carboxamido-staurosporine.png
+code/compoundimages/N-methylphloretamide.png
+code/compoundimages/N-Tetradecadienoyl-L-homoserine lactone.png
+code/compoundimages/Nai414-B.png
+code/compoundimages/Namalide C.png
+code/compoundimages/Namalide E.png
+code/compoundimages/Naphthacemycin B3.png
+code/compoundimages/Naphthgeranine A.png
+code/compoundimages/Neomacrophorin III.png
+code/compoundimages/Nevaltophin A.png
+code/compoundimages/Nigerapyrone H.png
+code/compoundimages/Nitrosoxacin C.png
+code/compoundimages/Nocapyrone R.png
+code/compoundimages/Nocardichelin B.png
+code/compoundimages/Nocardiopyrone A.png
+code/compoundimages/Nostopeptolide A3.png
+code/compoundimages/Nostopeptolide L3.png
+code/compoundimages/Nostophycin.png
+code/compoundimages/Not named.png
+code/compoundimages/NP-101A.png
+code/compoundimages/NW-G03.png
+code/compoundimages/Obscurolide-C2 methyl ester.png
+code/compoundimages/Octacyclomycin.png
+code/compoundimages/Odyverdiene B.png
+code/compoundimages/Okaramine H.png
+code/compoundimages/Oryzamide B.png
+code/compoundimages/Oscillamide B.png
+code/compoundimages/Oscillatoxin E.png
+code/compoundimages/Oxepinamide C.png
+code/compoundimages/Palmyrrolinone.png
+code/compoundimages/Panclicin E.png
+code/compoundimages/Panosialin C.png
+code/compoundimages/Paulomycin E.png
+code/compoundimages/PD-118576-A3.png
+code/compoundimages/Pepsatin Pr.png
+code/compoundimages/Pestabacillin B.png
+code/compoundimages/Phe+CO\[Lys+Val+Leu+MeHty+MetO\].png
+code/compoundimages/Phenalinolactone A.png
+code/compoundimages/Phenoxan.png
+code/compoundimages/Phenylbutenote.png
+code/compoundimages/Phenylnannolone A.png
+code/compoundimages/Phenylnannolone C.png
+code/compoundimages/Photopyrone A.png
+code/compoundimages/Phototemtide A.png
+code/compoundimages/Piericidin B5.png
+code/compoundimages/Pimprinol A.png
+code/compoundimages/Planktocyclin.png
+code/compoundimages/Planktopeptin BL843.png
+code/compoundimages/PM-toxin B.png
+code/compoundimages/Porpoisamide B.png
+code/compoundimages/Poststatin.png
+code/compoundimages/Pseudoaeruginosin NS1.png
+code/compoundimages/Pseudodestruxin A.png
+code/compoundimages/Psi-tectorigenin.png
+code/compoundimages/Psuedodestruxin C.png
+code/compoundimages/Pukeleimide E.png
+code/compoundimages/Pulicatin A.png
+code/compoundimages/Pyonitrin A.png
+code/compoundimages/Pyridindolol K2.png
+code/compoundimages/Pyridinopyrone C.png
+code/compoundimages/Pyrroindomycin B.png
+code/compoundimages/Qinimycin C.png
+code/compoundimages/Quinolobactin.png
+code/compoundimages/Rakicidin B.png
+code/compoundimages/Ralfuranone B.png
+code/compoundimages/Ralfuranone I.png
+code/compoundimages/Ralstonin B.png
+code/compoundimages/Rhabdopeptide 8.png
+code/compoundimages/Rhizomide B.png
+code/compoundimages/RHM2.png
+code/compoundimages/Rhodopeptin C1.png
+code/compoundimages/Rhodopeptin C4.png
+code/compoundimages/Ribocyclophane C.png
+code/compoundimages/Rifamycin Z.png
+code/compoundimages/RK-144171.png
+code/compoundimages/Roquefortine A.png
+code/compoundimages/Roseobacticide H.png
+code/compoundimages/Salinipostin D.png
+code/compoundimages/Salinosporamide I.png
+code/compoundimages/Sanglifehrin C.png
+code/compoundimages/Sarpeptin B.png
+code/compoundimages/SCH 38518.png
+code/compoundimages/Sch 39185.png
+code/compoundimages/Sclerolizine.png
+code/compoundimages/Semiplenamide F.png
+code/compoundimages/Serinolamides D.png
+code/compoundimages/Serratamolide C.png
+code/compoundimages/Serratamolide D.png
+code/compoundimages/Serratamolide E.png
+code/compoundimages/SF-1902-A3.png
+code/compoundimages/SF-1902-A4b.png
+code/compoundimages/SF-2140.png
+code/compoundimages/SF2738C.png
+code/compoundimages/Shikometabolin A.png
+code/compoundimages/Siastatin B.png
+code/compoundimages/Silalthride.png
+code/compoundimages/Sordarin-1-glucose ester.png
+code/compoundimages/Spliceostatin E.png
+code/compoundimages/Spongiporic acid A.png
+code/compoundimages/Sporminarin B.png
+code/compoundimages/Stoloniferone L.png
+code/compoundimages/Strepantibin C.png
+code/compoundimages/Streptoaminal-8n.png
+code/compoundimages/Streptoaminal9n.png
+code/compoundimages/Streptofactin.png
+code/compoundimages/Streptoone C.png
+code/compoundimages/Streptovirudin D1.png
+code/compoundimages/Strevertene B.png
+code/compoundimages/Syringolin G.png
+code/compoundimages/T1801 A.png
+code/compoundimages/Tasipeptin A.png
+code/compoundimages/Tasipeptin B.png
+code/compoundimages/Tautomycin.png
+code/compoundimages/Teixobactin.png
+code/compoundimages/Tenacibactin A.png
+code/compoundimages/Tenacibactin B.png
+code/compoundimages/Terresterol.png
+code/compoundimages/Tetradecanenitrile.png
+code/compoundimages/Tetronomycin.png
+code/compoundimages/Thailandamide lactone.png
+code/compoundimages/Thaxteramide A2.png
+code/compoundimages/Thaxtomin B.png
+code/compoundimages/Tjipanazole C1.png
+code/compoundimages/Trichophycin C.png
+code/compoundimages/Triedimycin A.png
+code/compoundimages/Trierixin.png
+code/compoundimages/Tyromycic acid G.png
+code/compoundimages/U-77864.png
+code/compoundimages/UK-78629.png
+code/compoundimages/Unguisin E.png
+code/compoundimages/USF-142A.png
+code/compoundimages/Uvidin-A ester 2a.png
+code/compoundimages/Violapyrone B.png
+code/compoundimages/Violapyrone E.png
+code/compoundimages/VLP T.png
+code/compoundimages/Wortmanamide B.png
+code/compoundimages/Xanthocillin-X dimethylether.png
+code/compoundimages/Xefoampeptide C.png
+code/compoundimages/Xentrivalpeptide O.png
+code/compoundimages/Yanucamide A.png
+code/compoundimages/Yatakemycin.png
+code/compoundimages/Yicathin C.png
+code/compoundimages/YM-47515 degradation product.png
+code/compoundimages/Ypaoamide C.png
+code/compoundimages/Z-4-2.png
+code/test_upsetplt.png
+code/test_upsetplt.png
+code/treemap.png
+code/untitled0.py
+code/test_upsetplt.png
+code/test_upsetplt.png
+code/treemap.png
