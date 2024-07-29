@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from filter import listfilter
+from tqdm import tqdm
 
 def tstat(m1, sd1, n1, m2, sd2, n2):
     """
@@ -61,26 +62,71 @@ def groupave(analysis_params):
         None
     """
     print('Averaging groups')
-    # Load data
-    msdata_errprop = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
 
-    # Find technical averages and RSDs
-    msdata_errprop_tidy = msdata_errprop.stack([0, 1, 2])
-    msdata_errprop_mean = msdata_errprop_tidy.groupby(level=[0, 1, 2, 3, 4]).mean()
-    msdata_errprop_mean = msdata_errprop_mean.groupby(level=[0, 1, 2, 3]).mean().to_frame()
-    msdata_errprop_mean.columns = ['average']
-    msdata_errprop_mean['biolRSD'] = msdata_errprop_tidy.groupby(level=[0, 1, 2, 3]).std().fillna(0) / msdata_errprop_tidy.groupby(level=[0, 1, 2, 3]).mean()
-    msdata_errprop_mean['bioln'] = msdata_errprop_tidy.groupby(level=[0, 1, 2, 3]).count()
-    msdata_errprop_sd = (msdata_errprop_tidy.groupby(level=[0, 1, 2, 3, 4]).std() / msdata_errprop_tidy.groupby(level=[0, 1, 2, 3, 4]).mean()).to_frame()
-    msdata_errprop_mean['techRSD'] = msdata_errprop_sd.groupby(level=[0, 1, 2, 3]).mean()
-    msdata_errprop_n = msdata_errprop_tidy.groupby(level=[0, 1, 2, 3, 4]).count()
-    msdata_errprop_mean['techn'] = msdata_errprop_n.groupby(level=[0, 1, 2, 3]).mean()
+    # Calculate total number of cells in the dataset and set chunk size based on 100,000 cells per chunk
+    total_rows = sum(1 for _ in open(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'))) - 1
+    header = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), nrows=0, header=[0, 1, 2])
+    total_columns = header.shape[1]
+    cells_per_chunk = 100_000
+    chunk_size = max(1, cells_per_chunk // total_columns)  # Rows per chunk
 
-    # Save summary data and group averages
+    # Initialize containers for aggregating results
+    sum_squares = {}
+    sum_values = {}
+    count_values = {}
+
+    # Process data in chunks with a progress bar
+    with tqdm(total=(total_rows // chunk_size) + 1, desc='Processing chunks') as pbar:
+        for chunk in pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                                 sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size):
+            chunk_stacked = chunk.stack([0, 1, 2])
+            
+            # Compute sum of values, sum of squares, and count per group
+            groupby_indices = chunk_stacked.groupby(level=[0, 1, 2, 3, 4])
+            sum_values_chunk = groupby_indices.sum()
+            sum_squares_chunk = (chunk_stacked ** 2).groupby(level=[0, 1, 2, 3, 4]).sum()
+            count_chunk = groupby_indices.count()
+            
+            # Aggregate results across chunks
+            for index in sum_values_chunk.index:
+                if index not in sum_values:
+                    sum_values[index] = sum_values_chunk[index]
+                    sum_squares[index] = sum_squares_chunk[index]
+                    count_values[index] = count_chunk[index]
+                else:
+                    sum_values[index] += sum_values_chunk[index]
+                    sum_squares[index] += sum_squares_chunk[index]
+                    count_values[index] += count_chunk[index]
+
+            pbar.update(1)
+
+    # Convert aggregated results to DataFrames and set MultiIndex
+    index = pd.MultiIndex.from_tuples(sum_values.keys())
+    sum_values_df = pd.DataFrame(list(sum_values.values()), index=index)
+    sum_squares_df = pd.DataFrame(list(sum_squares.values()), index=index)
+    count_values_df = pd.DataFrame(list(count_values.values()), index=index)
+
+    # Calculate mean and standard deviation
+    mean_values = sum_values_df / count_values_df
+    variance_values = (sum_squares_df / count_values_df) - (mean_values ** 2)
+    stddev_values = variance_values ** 0.5
+
+    # Calculate technical and biological RSDs
+    mean_values_grouped = mean_values.groupby(level=[0, 1, 2, 3]).mean()
+    stddev_values_grouped = stddev_values.groupby(level=[0, 1, 2, 3]).mean()
+
+    # Create DataFrame for results
+    msdata_errprop_mean = mean_values_grouped.copy()
+    msdata_errprop_mean['average'] = mean_values_grouped
+    msdata_errprop_mean['biolRSD'] = stddev_values_grouped / mean_values_grouped
+    msdata_errprop_mean['bioln'] = count_values_df.groupby(level=[0, 1, 2, 3]).sum()
+    msdata_errprop_mean['techRSD'] = stddev_values.groupby(level=[0, 1, 2, 3]).mean()
+    msdata_errprop_mean['techn'] = count_values_df.groupby(level=[0, 1, 2, 3]).mean()
+
+    # Save results to CSV files
     msdata_errprop_mean.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_summarydata.csv'), header=True, index=True)
-    msdata_errprop_grpav = msdata_errprop_mean.loc[:, msdata_errprop_mean.columns.intersection(['average'])]
+    msdata_errprop_grpav = msdata_errprop_mean[['average']]
     msdata_errprop_grpav.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_groupaverages.csv'), header=True, index=True)
-
 def properr(analysis_params):
     """
     Propagates error and calculates the combined relative standard deviation, absolute combined standard deviation,

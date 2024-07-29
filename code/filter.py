@@ -8,6 +8,7 @@ import numpy as np
 import math
 import scipy.cluster.hierarchy as spc
 import mspwriter
+from tqdm import tqdm
 
 class ionmerge:
     """
@@ -232,13 +233,61 @@ def cvfilter(analysis_params, ionfilterlist, threshold):
     """
     print('Running CV filter')
     
-    # Import data and calculate CV
-    msdata = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
-                         sep=',', header=[0, 1, 2], index_col=[0, 1, 2]).stack([0, 1, 2])
-    msdata_cv = (msdata.groupby(level=[0, 1, 2, 3, 4]).std() / msdata.groupby(level=[0, 1, 2, 3, 4]).mean())
-    msdatameancv = msdata_cv.groupby(level=0).mean().to_frame()
-    msdatamediancv = msdata_cv.groupby(level=0).median().to_frame()
-    
+    # Calculate total number of cells in the dataset and set chunk size based on 100,000 cells per chunk
+    total_rows = sum(1 for _ in open(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'))) - 1
+    header = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), nrows=0, header=[0, 1, 2])
+    total_columns = header.shape[1]
+    cells_per_chunk = 100_000
+    chunk_size = max(1, cells_per_chunk // total_columns)  # Rows per chunk
+
+    # Initialize containers for aggregating results
+    sum_squares = {}
+    sum_values = {}
+    count_values = {}
+
+    # Import data and calculate sums and counts in chunks with a progress bar
+    with tqdm(total=(total_rows // chunk_size) + 1, desc='Processing chunks') as pbar:
+        for chunk in pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                                 sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size):
+            chunk_stacked = chunk.stack([0, 1, 2])
+            
+            # Compute the sum of values, sum of squares, and count per group
+            groupby_indices = chunk_stacked.groupby(level=[0, 1, 2, 3, 4])
+            sum_values_chunk = groupby_indices.sum()
+            sum_squares_chunk = (chunk_stacked ** 2).groupby(level=[0, 1, 2, 3, 4]).sum()
+            count_chunk = groupby_indices.count()
+            
+            # Aggregate results across chunks
+            for index in sum_values_chunk.index:
+                if index not in sum_values:
+                    sum_values[index] = sum_values_chunk[index]
+                    sum_squares[index] = sum_squares_chunk[index]
+                    count_values[index] = count_chunk[index]
+                else:
+                    sum_values[index] += sum_values_chunk[index]
+                    sum_squares[index] += sum_squares_chunk[index]
+                    count_values[index] += count_chunk[index]
+                    
+            pbar.update(1)
+
+    # Convert aggregated results to DataFrames and set MultiIndex
+    index = pd.MultiIndex.from_tuples(sum_values.keys())
+    sum_values_df = pd.DataFrame(list(sum_values.values()), index=index)
+    sum_squares_df = pd.DataFrame(list(sum_squares.values()), index=index)
+    count_values_df = pd.DataFrame(list(count_values.values()), index=index)
+
+    # Calculate mean and variance
+    mean_values = sum_values_df / count_values_df
+    variance_values = (sum_squares_df / count_values_df) - (mean_values ** 2)
+    stddev_values = variance_values ** 0.5
+
+    # Calculate CV
+    msdata_cv = stddev_values / mean_values
+
+    # Calculate average and median CV
+    msdatameancv = msdata_cv.groupby(level=0).mean()
+    msdatamediancv = msdata_cv.groupby(level=0).median()
+
     # Add average and median CV to iondict.csv
     iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
     iondict['average CV'] = msdatameancv.iloc[:, 0]
@@ -260,6 +309,7 @@ def cvfilter(analysis_params, ionfilterlist, threshold):
     iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
     
     return ionfilterlist
+
 
 # -----Deringing and relational filter algorithm-----
 def relationalfilter(analysis_params, ionfilterlist):
