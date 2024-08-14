@@ -40,6 +40,7 @@ from sklearn.preprocessing import StandardScaler
 from matplotlib.patches import Ellipse
 from filter import listfilter
 import time
+import math
 
 from pvclust import PvClust
 
@@ -408,6 +409,9 @@ class plot_heatmap():
         parent.canvas[currplt].figure.axes[2].set_ylabel('Feature',  **self.fcsfont)
         parent.canvas[currplt].figure.axes[3].set_aspect(2.5)
         parent.canvas[currplt].figure.axes[2].get_yaxis().set_ticks([])
+        #colind = cm.dendrogram_col.reordered_ind
+        #parent.canvas[currplt].figure.axes[2].set_xticks(range(len(colind)))
+        #parent.canvas[currplt].figure.axes[2].set_xticklabels(colind, rotation=0)
         parent.canvas[currplt].draw()
         
     def reset(self, parent, currplt, frame, file):
@@ -554,6 +558,11 @@ class plot_samplecorr(ui_plot):
         pmatrix = msdata.corr(method='spearman')
         ax = self.parent.ax[self.currplt].figure.axes[0] if len(self.parent.ax[self.currplt].figure.axes) > 1 else self.parent.ax[self.currplt]
         sns.heatmap(pmatrix, ax=ax, cmap=self.parent.analysis_paramsgui.colorscheme, vmin=0, vmax=1)
+        ax.tick_params(axis='both', which='both', labelsize=10)
+        ax.set_xticks(range(len(pmatrix.columns)))
+        ax.set_xticklabels(pmatrix.columns, rotation=90)
+        ax.set_yticks(range(len(pmatrix.index)))
+        ax.set_yticklabels(pmatrix.index, rotation=0)
         ax.axes.get_xaxis().get_label().set_visible(False)
         ax.axes.get_yaxis().get_label().set_visible(False)
         self.parent.fig[self.currplt].subplots_adjust(left=.1, right=.95, bottom=0.15, top=0.9, hspace=0.2, wspace=0.2)
@@ -1016,6 +1025,8 @@ class prev_cv(ui_plot):
         meanav = 0
         meanmed = 0
         sumskew = 0
+        if math.isnan(modelstdev):
+            modelstdev = 1.7
         for val in range(1, int((modelstdev*100))):
             pos = val/100
             meanav = iondictmean[abs(iondictmean['average CV'] - pos-modelstdev/200) < modelstdev/200].iloc[:,0].mean()
