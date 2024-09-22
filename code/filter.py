@@ -250,7 +250,7 @@ def cvfilter(analysis_params, ionfilterlist, threshold):
     with tqdm(desc='Processing chunks', unit='chunk') as pbar:
         for chunk in pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
                                  sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size):
-            chunk_stacked = chunk.stack([0, 1, 2])
+            chunk_stacked = chunk.stack([0, 1, 2],future_stack=True)
             
             # Group data by the specified levels and calculate mean, std, and count per group
             groupby_indices = chunk_stacked.groupby(level=[0, 1, 2, 3, 4])
@@ -324,7 +324,7 @@ def relationalfilter(analysis_params, ionfilterlist):
     
     print('Running relational filter')
     pdindex = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), sep = ',', header = [2], index_col = None)
-    pdindex.drop(pdindex.columns.difference(['Compound','m/z','Retention time (min)']), 1, inplace=True)
+    pdindex.drop(pdindex.columns.difference(['Compound','m/z','Retention time (min)']), axis=1, inplace=True)
     pdindex = pdindex.sort_values(['m/z'], ascending=[1])
     npindex = pdindex.to_numpy()
 
