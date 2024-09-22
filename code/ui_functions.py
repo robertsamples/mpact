@@ -283,6 +283,7 @@ class UIFunctions(MainWindow):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(2)
         self.highlight_feature(self.pickedfeature)
+        UIFunctions.reset_ftrdialogbar(self)
         self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_activebtn)
         
     def goto_hits(self):

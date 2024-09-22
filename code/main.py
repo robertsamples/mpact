@@ -314,9 +314,13 @@ class MainWindow(QMainWindow):
     
         for elem in msdata.iloc[2]:
             biolgroup = combinedmetadata.loc[elem, 'Biological_Group']
-            if biolgroup not in groups:
-                groups.append(combinedmetadata.loc[elem, 'Biological_Group'])
-    
+            try:
+                if biolgroup not in groups:
+                    groups.append(combinedmetadata.loc[elem, 'Biological_Group'])
+            except Exception:
+                print(biolgroup)
+                print("")
+                print(groups)
         self.groups = groups
     
         # Set experimental and control grp defaults in ui
@@ -719,7 +723,10 @@ class MainWindow(QMainWindow):
             self.fillfttree()
             self.dbsearchdone = True
         
-        gen_upsetplt(self)
+        try:
+            gen_upsetplt(self)
+        except Exception:
+            print("not generating upset plot due to an error")
         stop_functime('upsetplt complete')
         self.ui.label_status.setText('Analysis Complete')
         stop_functime('analysis complete')

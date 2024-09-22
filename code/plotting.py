@@ -553,7 +553,7 @@ class plot_samplecorr(ui_plot):
     def plot(self, parent, file, filtereddfs, groupsets):
         iondict = pd.read_csv(self.parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         msdata = pd.read_csv(self.parent.analysis_paramsgui.outputdir / (self.parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-        msdata = msdata.stack([0, 1, 2]).groupby(level=[0, 1, 2, 3, 4]).mean().droplevel(level=3, axis=0).unstack()
+        msdata = msdata.stack([0, 1, 2], future_stack=True).groupby(level=[0, 1, 2, 3, 4]).mean().droplevel(level=3, axis=0).unstack()
         msdata.index = msdata.index.droplevel([1, 2])
         pmatrix = msdata.corr(method='spearman')
         ax = self.parent.ax[self.currplt].figure.axes[0] if len(self.parent.ax[self.currplt].figure.axes) > 1 else self.parent.ax[self.currplt]
@@ -805,7 +805,7 @@ class plot_PCA(ui_plot):
         if parent.collapsereps:
             # Average techreps if replicate collapse is selected
             msdata = pd.read_csv(file, sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-            msdata = msdata.stack([0, 1, 2])
+            msdata = msdata.stack([0, 1, 2], future_stack = True)
             msdata = msdata.groupby(level=[0, 1, 2, 3, 4]).mean().unstack(level=[-1, -2])
             test2 = msdata.columns.to_list()
             msdata = msdata.reset_index()
