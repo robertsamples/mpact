@@ -420,7 +420,7 @@ class MainWindow(QMainWindow):
         smilesdict = {}
         self.ftrdialog.ui.treeWidget.clear()
         for index, row in hits.iterrows():
-            itemdict[x] = QtWidgets.QTreeWidgetItem( [row['compound_names'], row['compound_molecular_formula'], str(row['compound_accurate_mass']), str(row['ppm']), (str(row['genus'] + ' ' + row['origin_species'])), row['compound_smiles']])
+            itemdict[x] = QtWidgets.QTreeWidgetItem( [row['compound_name'], row['compound_molecular_formula'], str(row['compound_accurate_mass']), str(row['ppm']), (str(row['genus'] + ' ' + row['origin_species'])), row['compound_smiles']])
             self.ftrdialog.ui.treeWidget.addTopLevelItem(itemdict[x])
             x = x + 1
         
@@ -765,7 +765,7 @@ class MainWindow(QMainWindow):
         
         self.analysis_paramsgui.kingdom = self.ui.combo_kingdom.currentText()
         self.analysis_paramsgui.genus = str(self.ui.lineEdit_genus.text())
-        self.atlas = pd.read_csv('npatlas.csv', sep = ',', header = [0], index_col = [1])
+        self.atlas = pd.read_csv('npatlas.tsv', sep='\t', header=0, index_col=1)
         if len(self.analysis_paramsgui.kingdom) > 3:
             self.atlas = self.atlas[self.atlas['origin_type'] == self.analysis_paramsgui.kingdom]
         if len(self.analysis_paramsgui.genus) > 3:
