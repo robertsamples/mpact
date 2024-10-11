@@ -83,6 +83,11 @@ class UIFunctions(MainWindow):
         # APPLY DROPSHADOW TO FRAME
         #self.ui.drop_shadow_frame.setGraphicsEffect(self.shadow)
 
+        self.ui.frame_plts.hide()
+        self.ui.checkBox_fc.hide()
+        self.ui.checkBox_ttest.hide()
+        self.dialog.ui.checkBox_bootstrap.setChecked(True)
+
         # Top bar functions
         self.ui.btn_maximize.clicked.connect(lambda: UIFunctions.maximize_restore(self))
         self.ui.btn_minimize.clicked.connect(lambda: self.showMinimized())
@@ -468,19 +473,21 @@ class UIFunctions(MainWindow):
                 else:
                     self.ui.lineEdit_blankfilter_relthresh.setText(str(self.analysis_paramsgui.blankfilthresh))
                     self.ui.radioButton_blankfilter_rel.setChecked(True)
-    
+                
+
                 self.ui.checkBox_pca.setChecked(self.analysis_paramsgui.PCA)
                 self.ui.checkBox_dend.setChecked(self.analysis_paramsgui.Dendrogram)
-                self.dialog.ui.checkBox_bootstrap.setChecked(self.analysis_paramsgui.bootstrap)
                 self.ui.checkBox_mzrt.setChecked(self.analysis_paramsgui.MZRTplt)
                 self.ui.checkBox_kmd.setChecked(self.analysis_paramsgui.KMD)
                 self.ui.checkBox_fc.setChecked(self.analysis_paramsgui.FC)
                 self.ui.checkBox_3dfc.setChecked(self.analysis_paramsgui.FC3Dplt)
                 self.ui.checkBox_ttest.setChecked(self.analysis_paramsgui.Ttest)
                 self.ui.checkBox_volcano.setChecked(self.analysis_paramsgui.Volcanoplt)
+                
                 self.ui.checkBox_FDR.setChecked(self.analysis_paramsgui.FDR)
+                self.dialog.ui.checkBox_bootstrap.setChecked(self.analysis_paramsgui.bootstrap)
                 self.ui.combo_expgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[0]))
-                self.ui.combo_ctrgrp.setCurrentText(self.analysis_paramsgui.statstgrps[1])
+                self.ui.combo_ctrgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[1]))
                 
                 self.dialog.ui.combo_colorscheme.setCurrentText(self.analysis_paramsgui.colorscheme)
                 self.dialog.ui.lineEdit_pqthresh.setText(str(self.analysis_paramsgui.pqthresh))
