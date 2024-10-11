@@ -82,7 +82,10 @@ def groupave(analysis_params):
             sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size
         ):
             # Stack the DataFrame to move column levels into the index
-            chunk_stacked = chunk.stack(level=[0, 1, 2],future_stack = True)
+            try:
+                chunk_stacked = chunk.stack(level=[0, 1, 2], future_stack=True)
+            except TypeError:
+                chunk_stacked = chunk.stack(level=[0, 1, 2])
 
             # Set index names according to your data structure
             chunk_stacked.index.names = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']

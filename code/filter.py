@@ -250,7 +250,10 @@ def cvfilter(analysis_params, ionfilterlist, threshold):
     with tqdm(desc='Processing chunks', unit='chunk') as pbar:
         for chunk in pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
                                  sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size):
-            chunk_stacked = chunk.stack([0, 1, 2],future_stack=True)
+            try:
+                chunk_stacked = chunk.stack([0, 1, 2], future_stack=True)
+            except TypeError:
+                chunk_stacked = chunk.stack([0, 1, 2])
             
             # Group data by the specified levels and calculate mean, std, and count per group
             groupby_indices = chunk_stacked.groupby(level=[0, 1, 2, 3, 4])

@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
         #self.show() # makes window reappear, acts like normal window now (on top now but can be underneath if you raise another window)
         
         self.ui.setupUi(self)
-        self.ui.label_credits.setText('v1.00 r24.08.14')
+        self.ui.label_credits.setText('v1.00 r24.10.11')
                 
         #initialize other dialog windows
         self.dialog = dialog()
@@ -330,20 +330,24 @@ class MainWindow(QMainWindow):
         self.ui.combo_expgrp.addItems(self.groups)
         self.ui.combo_ctrgrp.clear()
         self.ui.combo_ctrgrp.addItems(self.groups)
-            
+        
         # Set experimental and control group defaults in ui
-        pos = 0
-        expset = False
-        for group in self.groups:
-            if 'blank' in group.lower():
-                self.ui.combo_blankfil_name.setCurrentIndex(pos)
-            else:
-                if expset:
-                    self.ui.combo_ctrgrp.setCurrentIndex(pos)
+        if hasattr(self, 'analysis_paramsgui') and self.analysis_paramsgui.statstgrps:
+            self.ui.combo_expgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[0]))
+            self.ui.combo_ctrgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[1]))
+        else:
+            pos = 0
+            expset = False
+            for group in self.groups:
+                if 'blank' in group.lower():
+                    self.ui.combo_blankfil_name.setCurrentIndex(pos)
                 else:
-                    self.ui.combo_expgrp.setCurrentIndex(pos)
-                    expset = True
-            pos += 1
+                    if expset:
+                        self.ui.combo_ctrgrp.setCurrentIndex(pos)
+                    else:
+                        self.ui.combo_expgrp.setCurrentIndex(pos)
+                        expset = True
+                pos += 1
     
         
     def fulldbsearch(self):
@@ -387,12 +391,24 @@ class MainWindow(QMainWindow):
             self.ui.treeWidget.addTopLevelItem(item)
     
         def onItemClicked():
-            # Rename to onItemClicked
-            item = self.ui.treeWidget.selectedItems()[0]
-            pickedfeature = item.text(0)
-            self.highlight_feature(pickedfeature)  # Highlights the selected feature
-    
-        self.ui.treeWidget.itemSelectionChanged.connect(onItemClicked)
+            if len(self.ftrdialog.ui.treeWidget.selectedItems()) > 0:
+                item = self.ftrdialog.ui.treeWidget.selectedItems()[0]
+                smiles = item.text(5)
+                if smiles:
+                    try:
+                        m = indigo.loadMolecule(smiles)
+                        indigo.setOption('render-image-size', '400,400')
+                        image_path = f'compoundimages/{item.text(0)}.png'
+                        renderer.renderToFile(m, image_path)
+                        pixmap = QPixmap(image_path)
+                        pixmap2 = pixmap.scaled(400, 400, QtCore.Qt.KeepAspectRatio)
+                        self.ftrdialog.ui.label.setPixmap(pixmap2)
+                    except Exception as e:
+                        print(f"Error rendering molecule for {item.text(0)}: {e}")
+                        # Optionally, display a default image or message
+                else:
+                    print(f"No SMILES string available for {item.text(0)}")
+                    # Handle the case where SMILES is empty
                 
 
                                      
