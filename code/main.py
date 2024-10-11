@@ -2,9 +2,13 @@
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 """
+# CHECK/IMPORT DEPENDENCIES
+from importdependencies import checkdep
+if __name__ == "__main__":
+    checkdep()
 
 import re
-
+import os
 import sys
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
@@ -14,8 +18,13 @@ import string
 import platform
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
-from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
+from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent, QLoggingCategory)
 from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
+# Suppress specific Qt debug and info messages
+QLoggingCategory.setFilterRules("*.debug=false\n*.info=false")
+sys.stderr = open(os.devnull, 'w')
+
+
 from pathlib import Path
 
 # GUI FILE
@@ -35,7 +44,6 @@ from indigo import Indigo
 from indigo.renderer import IndigoRenderer
 indigo = Indigo()
 renderer = IndigoRenderer(indigo)
-import os
 
 import pickle
 
@@ -931,10 +939,16 @@ class MainWindow(QMainWindow):
         self.dragPos = event.globalPos()
         
     
+
+
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     if sys.platform != 'win32':
         app.setStyle('Fusion')
-    app.setStyleSheet("QFrame { border: 0px; }") #QToolTip { color: #999999; background-color: rgb(0, 255, 0); border: 1px solid grey; }")
+    # Create all windows and dialogs after setting the filter
     window = MainWindow()
+    window.dialog = dialog()
+    window.ftrdialog = ftrdialog()
+    window.show()
     sys.exit(app.exec_())

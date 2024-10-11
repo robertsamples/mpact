@@ -8,7 +8,18 @@ import sys
 from tkinter import * 
 from tkinter import messagebox
 import os
-
+try:
+    import indigo
+except Exception:
+    pass
+try:
+    import upsetplot
+except Exception:
+    pass
+try:
+    import squarify
+except Exception:
+    pass
 
 def install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
