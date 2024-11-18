@@ -100,7 +100,7 @@ def reformat_msdial(file):
     database.iloc[:,1] = database.iloc[:,3]
     headser = database.iloc[3,:] == 'Stdev'
     cutlen = len(headser[headser == True]) * 2 #cut cols for stdev and average
-    database2 = database.iloc[:,0:3].join(database.iloc[:,32: -cutlen])
+    database2 = database.iloc[:,0:3].join(database.iloc[:,35: -cutlen])
     database2.iloc[2,:] = database2.iloc[1,:]
     database2.iloc[3,:] = database2.iloc[1,:]
     database2 = database2.iloc[2:,:]

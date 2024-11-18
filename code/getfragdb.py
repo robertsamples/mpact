@@ -109,75 +109,80 @@ def importfrag_v2(fragfile):
     fragmentation_db
         A database of fragmentation ions.
     """
-    fragmsp = open(fragfile, 'r')
-    regex = []
-    while True:
-        line = fragmsp.readline()
-        
-        if (not line) or (':' not in line):
-            break
-        regex.append(line.split(':')[0])
-    fragmsp.close()
+    fragdb = fragmentation_db([])
+    with open(fragfile, 'r') as fragmsp:
+        content = fragmsp.read()
     
-    fragmsp = open(fragfile, 'r')
-    fragparams = {}
-    fragdb = fragmentation_db(regex)
-    while True:
-        line = fragmsp.readline()
-    
-        if not line:
-            break
+    # Split the file content into entries for each ion
+    entries = content.strip().split('\n\n')
+    for entry in entries:
+        lines = entry.strip().split('\n')
+        if not lines:
+            continue
+        fragparams = {}
         pairlist = []
-        while len(line)>5:
-            while ':' in line:
-                fragparams[line.split(':')[0]] = line.split(':')[1].strip()
-                line = fragmsp.readline()
-            line = fragmsp.readline()
-            
-            while ':' not in line and len(line)>5:
-                if not line or 'NAME:' in line.upper():
-                    break
-                pair = line.split()
-                pairlist.append([float(pair[0]), float(pair[1])])
-                line = fragmsp.readline()
-        outputarr = np.array(pairlist)
-        name = str(round(float(fragparams['RETENTIONTIME']),3))  + '_' + fragparams['PRECURSORMZ']
-        fragdb.ions[name] = ion(fragparams, outputarr)
-    fragmsp.close()
+        for line in lines:
+            if ':' in line:
+                parts = line.split(':', 1)
+                key = parts[0].strip().upper()  # Use upper case for consistency
+                value = parts[1].strip()
+                fragparams[key] = value
+            elif line.strip():
+                pair = line.strip().split()
+                if len(pair) >= 2:
+                    try:
+                        mz = float(pair[0])
+                        intensity = float(pair[1])
+                        pairlist.append([mz, intensity])
+                    except ValueError:
+                        # Handle cases where conversion to float fails
+                        continue
+        if 'RETENTIONTIME' in fragparams and 'PRECURSORMZ' in fragparams:
+            try:
+                retention_time = float(fragparams['RETENTIONTIME'])
+                precursor_mz = fragparams['PRECURSORMZ']
+                name = f"{round(retention_time, 3)}_{precursor_mz}"
+                outputarr = np.array(pairlist)
+                fragdb.ions[name] = ion(fragparams, outputarr)
+            except ValueError:
+                # Handle cases where conversion to float fails
+                continue
+    return fragdb
 
-    return(fragdb)
 
 def importfrag(fragfile):
     """
     Imports a fragmentation database from an MSP file, detecting the file type automatically.
-    
+
     Parameters:
     -----------
     fragfile: str
         The path to the MSP file.
-    
+
     Returns:
     --------
     fragmentation_db
         A database of fragmentation ions.
     """
-    
-    fragmsp = open(fragfile, 'r')
     has_parentheses = False
-    while True:
-        line = fragmsp.readline()
+    has_pipe = False
 
-        if not line:
-            break
-        if 'NAME:' in line.upper() and '(' in line and ')' in line:
-            has_parentheses = True
-            break
-    fragmsp.close()
-    
+    with open(fragfile, 'r') as fragmsp:
+        for line in fragmsp:
+            if line.upper().startswith('NAME:'):
+                if '|' in line:
+                    has_pipe = True
+                if '(' in line and ')' in line:
+                    has_parentheses = True
+                # Break after checking the first NAME: line
+                break
+
     if has_parentheses:
         print('Progenesis MSP file Detected')
         return importfrag_v1(fragfile)
-    else:
+    elif has_pipe:
         print('MS-DIAL MSP file Detected')
         return importfrag_v2(fragfile)
-
+    else:
+        print('Unknown MSP file format. Attempting MS-DIAL parsing by default.')
+        return importfrag_v2(fragfile)
