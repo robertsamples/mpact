@@ -244,6 +244,8 @@ class MainWindow(QMainWindow):
         self.highlight = {}
                 
         self.ui.btn_run.clicked.connect(self.run_analysis)
+        self.ui.treeWidget.itemSelectionChanged.connect(self.on_tree_item_selection_changed)
+
 
         def moveWindow(event):
             if UIFunctions.returnStatus() == 1:
@@ -377,40 +379,71 @@ class MainWindow(QMainWindow):
         iondict.to_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', header=True, index=True)
 
         
+
+
     def fillfttree(self):
         # Fill feature tree with database hits
-        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+        iondict = pd.read_csv(
+            self.analysis_paramsgui.outputdir / 'iondict.csv',
+            sep=',',
+            header=[0],
+            index_col=None
+        )
         iondict = iondict[iondict['hits'] >= 0]
         self.ui.treeWidget.setSortingEnabled(True)
-    
+
         itemdict = {}
         self.ui.treeWidget.clear()
         for i, row in iondict.iterrows():
-            item = NumericalTreeWidgetItem([row['Compound'], str(round(row['m/z'], 4)), str(round(row['Retention time (min)'], 3)), str(int(row['max'])), str(row['groups']), str(row['groups']), str(round(row['fc'], 2)), str(int(row['hits']))])
+            item = NumericalTreeWidgetItem([
+                row['Compound'],
+                str(round(row['m/z'], 4)),
+                str(round(row['Retention time (min)'], 3)),
+                str(int(row['max'])),
+                str(row['groups']),
+                str(row['groups']),
+                str(round(row['fc'], 2)),
+                str(int(row['hits']))
+            ])
             itemdict[i] = item
             self.ui.treeWidget.addTopLevelItem(item)
-    
-        def onItemClicked():
-            if len(self.ftrdialog.ui.treeWidget.selectedItems()) > 0:
-                item = self.ftrdialog.ui.treeWidget.selectedItems()[0]
-                smiles = item.text(5)
-                if smiles:
-                    try:
-                        m = indigo.loadMolecule(smiles)
-                        indigo.setOption('render-image-size', '400,400')
-                        image_path = f'compoundimages/{item.text(0)}.png'
-                        renderer.renderToFile(m, image_path)
-                        pixmap = QPixmap(image_path)
-                        pixmap2 = pixmap.scaled(400, 400, QtCore.Qt.KeepAspectRatio)
-                        self.ftrdialog.ui.label.setPixmap(pixmap2)
-                    except Exception as e:
-                        print(f"Error rendering molecule for {item.text(0)}: {e}")
-                        # Optionally, display a default image or message
-                else:
-                    print(f"No SMILES string available for {item.text(0)}")
-                    # Handle the case where SMILES is empty
-                
+        # Optionally expand all items
+        # self.ui.treeWidget.expandAll()
 
+
+    
+    def onItemClicked():
+        if len(self.ftrdialog.ui.treeWidget.selectedItems()) > 0:
+            item = self.ftrdialog.ui.treeWidget.selectedItems()[0]
+            smiles = item.text(5)
+            if smiles:
+                try:
+                    m = indigo.loadMolecule(smiles)
+                    indigo.setOption('render-image-size', '400,400')
+                    image_path = f'compoundimages/{item.text(0)}.png'
+                    renderer.renderToFile(m, image_path)
+                    pixmap = QPixmap(image_path)
+                    pixmap2 = pixmap.scaled(400, 400, QtCore.Qt.KeepAspectRatio)
+                    self.ftrdialog.ui.label.setPixmap(pixmap2)
+                except Exception as e:
+                    print(f"Error rendering molecule for {item.text(0)}: {e}")
+                    # Optionally, display a default image or message
+            else:
+                print(f"No SMILES string available for {item.text(0)}")
+                # Handle the case where SMILES is empty
+            
+    def on_tree_item_selection_changed(self):
+        selected_items = self.ui.treeWidget.selectedItems()
+        if selected_items:
+            item = selected_items[0]
+            # Get the name from the first column
+            name = item.text(0)
+            #print(f"Selection changed: {name}")
+            # Call the method to highlight the feature
+            self.highlight_feature(name)
+
+            # Call the onItemClicked logic
+            #self.onItemClicked(item)
                                      
     def runsearch(self, mass): # refactor if I can save a database of hits
         #possibly make a third common method used in both dbsearch and this method

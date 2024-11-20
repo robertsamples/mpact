@@ -284,18 +284,18 @@ class UIFunctions(MainWindow):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(2)
         self.highlight_feature(self.pickedfeature)
-        #UIFunctions.reset_ftrdialogbar(self)
+        UIFunctions.reset_ftrdialogbar(self)
         self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_activebtn)
         
     def goto_hits(self):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(0)
+        
         self.highlight_feature(self.pickedfeature)
-        #UIFunctions.reset_ftrdialogbar(self)
+        UIFunctions.reset_ftrdialogbar(self)
         self.ftrdialog.ui.btn_hits.setStyleSheet(self.ui.ftbar_activebtn)
         
     def goto_spectrum(self):
-        print('spec')
         self.ftrdialog.ui.btn_masst.show()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(1)
         UIFunctions.reset_ftrdialogbar(self)
