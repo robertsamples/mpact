@@ -504,11 +504,11 @@ class MainWindow(QMainWindow):
             self.ftrdialog.ui.label.setPixmap(pixmap2)
         else:
             self.ftrdialog.ui.treeWidget.setCurrentItem(itemdict[0])
-                
+                    
     def highlight_feature(self, newfeature):
         """
         Highlights the selected feature in all plots.
-
+    
         Args:
             newfeature (str): The name of the new feature to highlight.
         
@@ -534,34 +534,46 @@ class MainWindow(QMainWindow):
         
         # Update volcano plot with the selected feature
         if self.analysis_paramsgui.Volcanoplt:
-            self.highlight['volcano'].set_data(iondict.loc[self.pickedfeature, 'logfc'],
-                                                iondict.loc[self.pickedfeature, '-logq'])
+            self.highlight['volcano'].set_data(
+                [iondict.loc[self.pickedfeature, 'logfc']],
+                [iondict.loc[self.pickedfeature, '-logq']]
+            )
             self.canvas['volcano'].draw_idle()
-        
-        # Update MZRT plot with the selected feature
-        if self.analysis_paramsgui.MZRTplt:
-            self.highlight['mzrt'].set_data(iondict.loc[self.pickedfeature, 'Retention time (min)'],
-                                            iondict.loc[self.pickedfeature, 'm/z'])
+                
+            # Update MZRT plot with the selected feature
+            self.highlight['mzrt'].set_data(
+                [iondict.loc[self.pickedfeature, 'Retention time (min)']],
+                [iondict.loc[self.pickedfeature, 'm/z']]
+            )
             self.canvas['mzrt'].draw_idle()
         
         # Update KMD plot with the selected feature
         if self.analysis_paramsgui.KMD:
-            self.highlight['kmd'].set_data(iondict.loc[self.pickedfeature, 'm/z'],
-                                           iondict.loc[self.pickedfeature, 'kmd'])
+            self.highlight['kmd'].set_data(
+                [iondict.loc[self.pickedfeature, 'm/z']],
+                [iondict.loc[self.pickedfeature, 'kmd']]
+            )
             self.canvas['kmd'].draw_idle()
         
         # Update feature plot with the selected feature
-        self.highlight['featureplt'].set_data(iondict.loc[self.pickedfeature, 'Retention time (min)'],
-                                               iondict.loc[self.pickedfeature, 'm/z'])
+        self.highlight['featureplt'].set_data(
+            [iondict.loc[self.pickedfeature, 'Retention time (min)']],
+            [iondict.loc[self.pickedfeature, 'm/z']]
+        )
         self.canvas['featureplt'].draw_idle()
         
-        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'),
-                              sep=',', header=[2], index_col=[0])
+        msdata = pd.read_csv(
+            self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'),
+            sep=',', header=[2], index_col=[0]
+        )
         
         # Set heatmap highlight based on view
         self.heatind = self.cmind.index(msdata.index.to_list().index(self.pickedfeature))
         xlim = int(self.canvas['heatmap'].figure.axes[2].get_xlim()[1])
-        self.highlight['heatmap'].set_data([0, xlim, xlim, 0, 0], [self.heatind, self.heatind, self.heatind+1, self.heatind+1, self.heatind])
+        self.highlight['heatmap'].set_data(
+            [0, xlim, xlim, 0, 0],
+            [self.heatind, self.heatind, self.heatind+1, self.heatind+1, self.heatind]
+        )
         self.canvas['heatmap'].draw_idle()
         
         # Run search when feature is selected
@@ -573,6 +585,7 @@ class MainWindow(QMainWindow):
             self.spec.reset(self.fragdb.ions[self.pickedfeature].pattern)
         if self.ftrdialog.ui.stackedWidget.currentIndex() == 2 and not self.ftrdialog.isHidden():
             self.abundplt.reset()
+
 
      # Move heatmap selection up or down with W/S key press
     def keyPressEvent(self, event):
