@@ -262,37 +262,224 @@ class MainWindow(QMainWindow):
 
 
     #---Methods---
-    def exportgnps(self):  #move processing function to a different method                                                                        "*.txt")
-            # Load the first four rows (header) of the first file
-            header = pd.read_csv(self.gnpsfilename, nrows=4, keep_default_na=False, header=None,sep='\t')
 
-            # Ensure header has the same columns as df1
-            header.columns = range(header.shape[1])
-
-            # Load first file skipping first four rows
-            df1 = pd.read_csv(self.gnpsfilename, skiprows=4, header=None,sep='\t')
-
-            # Creating 'Compound' column in df1 by combining 'Average Rt(min)' and 'Average Mz'
-            df1['Compound'] = df1.iloc[:,1].astype(str) + '_' + df1.iloc[:,2].astype(str)
-
-            # Load second file with three header rows
-            df2 = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), header=[0,1,2])
-
-            # Convert 'Compound' column in df2 to set for faster lookup
-            compounds = set(df2['Unnamed: 0_level_0', 'Unnamed: 0_level_1','Compound'])
-
-            # Filter df1 based on 'Compound' column
-            df1_filtered = df1[df1['Compound'].isin(compounds)]
-
-            # Remove 'Compound' column from df1_filtered
-            df1_filtered = df1_filtered.drop('Compound', axis=1)
-            
-            # Combine header and filtered DataFrame
-            df_final = pd.concat([header, df1_filtered], ignore_index=True).fillna('null')
-
-            df_final.to_csv(self.analysis_paramsgui.outputdir / (self.gnpsfilename.stem + '_filtered.txt'),sep='\t', index=False, header = False)
-            self.ui.label_status.setText('Filtered GNPS peak table exported to output directory')
+        
     
+    def exportgnps(self):
+        """Export filtered GNPS peak table and optionally filter MGF file with new aligned IDs."""
+        
+        # Load the GNPS/MZmine file
+        df_gnps = pd.read_csv(self.gnpsfilename, sep=',')
+        
+        # Find the RT and m/z columns
+        rt_col = None
+        mz_col = None
+        
+        for col in df_gnps.columns:
+            if col == 'row m/z':
+                mz_col = col
+            elif col == 'row retention time':
+                rt_col = col
+        
+        # Fallback to position-based if exact names not found
+        if rt_col is None or mz_col is None:
+            cols = df_gnps.columns.tolist()
+            if 'row ID' in cols[0] or cols[0].lower() == 'row id':
+                mz_col = cols[1] if mz_col is None else mz_col
+                rt_col = cols[2] if rt_col is None else rt_col
+        
+        print(f"GNPS columns - RT: '{rt_col}', m/z: '{mz_col}'")
+        
+        # Load the filtered file 
+        filtered_file = self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv')
+        df_filtered = pd.read_csv(filtered_file, header=[0,1,2])
+        
+        # Extract compound identifiers from filtered file
+        compounds_to_keep = set()
+        filtered_rt_mz = []
+        
+        first_col_values = df_filtered.iloc[:, 0]
+        for val in first_col_values:
+            if pd.notna(val) and '_' in str(val):
+                compounds_to_keep.add(str(val))
+                # Parse RT and m/z
+                parts = str(val).split('_')
+                if len(parts) == 2:
+                    try:
+                        rt = float(parts[0])
+                        mz = float(parts[1])
+                        filtered_rt_mz.append((rt, mz))
+                    except:
+                        pass
+        
+        print(f"Found {len(compounds_to_keep)} compounds in filtered file")
+        
+        # Tolerance-based matching for GNPS data
+        rt_tolerance = 0.01
+        mz_tolerance = 0.01
+        
+        matched_indices = []
+        matched_compounds_info = []  # Store (index, rt, mz) for matched compounds
+        
+        for idx, row in df_gnps.iterrows():
+            try:
+                rt_gnps = float(row[rt_col])
+                mz_gnps = float(row[mz_col])
+                
+                # Check if this matches any filtered compound
+                for rt_filt, mz_filt in filtered_rt_mz:
+                    if abs(rt_gnps - rt_filt) <= rt_tolerance and abs(mz_gnps - mz_filt) <= mz_tolerance:
+                        matched_indices.append(idx)
+                        matched_compounds_info.append((idx, rt_gnps, mz_gnps))
+                        break
+            except:
+                continue
+        
+        # Create filtered dataframe with new sequential row IDs
+        df_gnps_filtered = df_gnps.loc[matched_indices].copy()
+        
+        # Assign new sequential row IDs starting from 1
+        if 'row ID' in df_gnps_filtered.columns:
+            df_gnps_filtered['row ID'] = range(1, len(df_gnps_filtered) + 1)
+        
+        print(f"Filtered {len(df_gnps_filtered)} rows from {len(df_gnps)} total rows")
+        
+        # Save the filtered GNPS file
+        output_file = self.analysis_paramsgui.outputdir / (self.gnpsfilename.stem + '_gnps_filtered.csv')
+        df_gnps_filtered.to_csv(output_file, sep=',', index=False)
+        print(f"Saved filtered GNPS file to: {output_file}")
+        
+        # ===== PROCESS MGF FILE IF IT EXISTS =====
+        # Look for MGF file in the same directory as the GNPS file
+        mgf_file = None
+        gnps_dir = Path(self.gnpsfilename).parent
+        
+        # Search for .mgf file
+        mgf_files = list(gnps_dir.glob('*.mgf'))
+        if mgf_files:
+            mgf_file = mgf_files[0]  # Take the first MGF file found
+            print(f"\nFound MGF file: {mgf_file.name}")
+        else:
+            print("\nNo MGF file found in GNPS directory")
+        
+        if mgf_file:
+            print("Processing MGF file...")
+            
+            # Create lookup for matched compounds
+            rt_mz_to_new_id = {}
+            for new_id, (orig_idx, rt, mz) in enumerate(matched_compounds_info, start=1):
+                key = (round(rt, 5), round(mz, 5))
+                rt_mz_to_new_id[key] = new_id
+            
+            # Parse and filter MGF
+            matched_mgf_entries = []
+            total_mgf_entries = 0
+            
+            def parse_mgf_entry(entry_lines):
+                """Parse MGF entry to extract RT and m/z."""
+                entry_data = {'lines': entry_lines}
+                for line in entry_lines:
+                    if line.startswith('FEATURE_ID='):
+                        entry_data['feature_id'] = int(line.split('=')[1])
+                    elif line.startswith('PEPMASS='):
+                        entry_data['mz'] = float(line.split('=')[1])
+                    elif line.startswith('RTINSECONDS='):
+                        # Convert RT from seconds to minutes
+                        entry_data['rt'] = float(line.split('=')[1]) / 60.0
+                    elif line.startswith('RTINMINUTES='):
+                        entry_data['rt'] = float(line.split('=')[1])
+                return entry_data
+            
+            def update_mgf_feature_id(entry_lines, new_id):
+                """Update FEATURE_ID in MGF entry."""
+                updated_lines = []
+                for line in entry_lines:
+                    if line.startswith('FEATURE_ID='):
+                        updated_lines.append(f'FEATURE_ID={new_id}\n')
+                    else:
+                        updated_lines.append(line)
+                return updated_lines
+            
+            # Read and process MGF file
+            with open(mgf_file, 'r') as f:
+                current_entry = []
+                
+                for line in f:
+                    if line.strip() == 'BEGIN IONS':
+                        if current_entry:
+                            total_mgf_entries += 1
+                            entry_data = parse_mgf_entry(current_entry)
+                            
+                            if 'rt' in entry_data and 'mz' in entry_data:
+                                rt = entry_data['rt']
+                                mz = entry_data['mz']
+                                
+                                # Debug first few entries
+                                if total_mgf_entries <= 3:
+                                    print(f"  MGF entry {total_mgf_entries}: RT={rt:.4f} min, m/z={mz:.4f}")
+                                
+                                # Check if matches any filtered compound
+                                matched = False
+                                key = (round(rt, 5), round(mz, 5))
+                                if key in rt_mz_to_new_id:
+                                    new_id = rt_mz_to_new_id[key]
+                                    entry_data['new_id'] = new_id
+                                    matched_mgf_entries.append(entry_data)
+                                    matched = True
+                                else:
+                                    # Check with tolerance
+                                    for (comp_rt, comp_mz), new_id in rt_mz_to_new_id.items():
+                                        if abs(comp_rt - rt) <= rt_tolerance and abs(comp_mz - mz) <= mz_tolerance:
+                                            entry_data['new_id'] = new_id
+                                            matched_mgf_entries.append(entry_data)
+                                            matched = True
+                                            if len(matched_mgf_entries) <= 3:
+                                                print(f"    Matched to compound RT={comp_rt:.4f}, m/z={comp_mz:.4f}")
+                                            break
+                            
+                            current_entry = []
+                        current_entry.append(line)
+                    elif line.strip() == 'END IONS':
+                        current_entry.append(line)
+                    elif current_entry:
+                        current_entry.append(line)
+                
+                # Process last entry
+                if current_entry:
+                    total_mgf_entries += 1
+                    entry_data = parse_mgf_entry(current_entry)
+                    if 'rt' in entry_data and 'mz' in entry_data:
+                        rt = entry_data['rt']
+                        mz = entry_data['mz']
+                        key = (round(rt, 5), round(mz, 5))
+                        if key in rt_mz_to_new_id:
+                            new_id = rt_mz_to_new_id[key]
+                            entry_data['new_id'] = new_id
+                            matched_mgf_entries.append(entry_data)
+            
+            # Sort by new ID and write filtered MGF
+            matched_mgf_entries.sort(key=lambda x: x['new_id'])
+            
+            mgf_output = self.analysis_paramsgui.outputdir / (mgf_file.stem + '_filtered.mgf')
+            with open(mgf_output, 'w') as f:
+                for entry_data in matched_mgf_entries:
+                    new_id = entry_data['new_id']
+                    updated_lines = update_mgf_feature_id(entry_data['lines'], new_id)
+                    for line in updated_lines:
+                        f.write(line.rstrip('\n') + '\n')
+                    f.write('\n')
+            
+            print(f"Filtered MGF: {len(matched_mgf_entries)} entries from {total_mgf_entries} total")
+            print(f"Saved filtered MGF to: {mgf_output}")
+        
+        # Update status
+        status_text = f'Filtered GNPS table ({len(df_gnps_filtered)} compounds)'
+        if mgf_file:
+            status_text += f' and MGF ({len(matched_mgf_entries)} entries)'
+        self.ui.label_status.setText(status_text)
+        
+        print("\n✓ Export completed successfully!")
+                
     def error(self, message):
         self.ui.label_status.setText(message)
         self.ui.label_status.setStyleSheet('color: rgb(150,0,0);')
@@ -624,8 +811,11 @@ class MainWindow(QMainWindow):
         Args:
             savefile (Path): The path to the saved session file.
         """
+        print("read1")
         with open(savefile, 'rb') as read_pi:
+            print("read3")
             self.savedata = pickle.load(read_pi)
+            print("read2")
     
         # Assign the analysis parameters
         self.analysis_paramsgui = self.savedata['parameters']
