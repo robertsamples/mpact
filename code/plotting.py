@@ -803,7 +803,7 @@ class plot_PCA(ui_plot):
             plot_cov_ellipse(self, cov, pos, nstd=2, ax=None, **kwargs): Generate an optimized ellipse for the confidence interval.
         """
         parent = self.parent
-        parent.collapsereps = parent.dialog.ui.checkBox_collapsereps.isChecked()
+        parent.collapsereps = False#parent.dialog.ui.checkBox_collapsereps.isChecked()
         
         if parent.collapsereps:
             # Average techreps if replicate collapse is selected

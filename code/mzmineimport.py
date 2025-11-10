@@ -67,25 +67,97 @@ def reformat_metaboscape(file):
 
 
 def reformat_mzmine(file):
-    """Reformat a file from the MZmine software.
+    """Reformat a file from the MZmine software (updated for newer versions)."""
+    data = pd.read_csv(file, sep=',', header=None, index_col=None)
     
-    Args:
-    - file (Path): the path of the file to reformat
-    """
-    data = pd.read_csv(file, sep = ',', header = None, index_col = None)
-    data.iloc[0, 0] = 'Compound'
-    data.iloc[0, 1] = 'm/z'
-    data.iloc[0, 2] = 'Retention time (min)'
+    # Find where sample columns start (look for file extensions or "Peak area")
+    sample_start_col = None
+    for idx, val in enumerate(data.iloc[0, :]):
+        if pd.notna(val) and ('.mzML' in str(val) or '.mzXML' in str(val) or 
+                               '.raw' in str(val) or '.cdf' in str(val) or
+                               'Peak area' in str(val)):
+            sample_start_col = idx
+            break
     
-    xpos = 3
-    for elem in data.iloc[0,3:]:
-        data.iloc[0,xpos]=data.iloc[0,xpos].split()[0][:-4]
-        xpos += 1
+    if sample_start_col is None:
+        # Find last metadata column
+        metadata_cols = ['row ID', 'row m/z', 'row retention time', 'row ion mobility', 
+                        'row ion mobility unit', 'row CCS', 'correlation', 'annotation']
+        last_metadata_idx = 0
+        for idx, val in enumerate(data.iloc[0, :]):
+            if pd.notna(val) and any(meta in str(val) for meta in metadata_cols):
+                last_metadata_idx = max(last_metadata_idx, idx)
+        sample_start_col = last_metadata_idx + 1
+    
+    # Find m/z and RT columns
+    mz_col = rt_col = id_col = None
+    for idx, val in enumerate(data.iloc[0, :sample_start_col]):
+        if pd.notna(val):
+            val_str = str(val).lower()
+            if 'row m/z' in val_str:
+                mz_col = idx
+            elif 'row retention time' in val_str:
+                rt_col = idx
+            elif 'row id' in val_str:
+                id_col = idx
+    
+    # Defaults
+    id_col = id_col if id_col is not None else 0
+    mz_col = mz_col if mz_col is not None else 1
+    rt_col = rt_col if rt_col is not None else 2
+    
+    # Find where valid sample columns end (exclude empty columns)
+    sample_end_col = len(data.columns)
+    for col_idx in range(len(data.columns) - 1, sample_start_col - 1, -1):
+        # Check if column header is empty or column has all NaN/zero values
+        if pd.isna(data.iloc[0, col_idx]) or str(data.iloc[0, col_idx]).strip() == '':
+            sample_end_col = col_idx
+        else:
+            break  # Found a valid column, stop looking
+    
+    # Build new data structure
+    new_data = []
+    
+    # Two empty header rows
+    num_cols = 3 + (sample_end_col - sample_start_col)
+    new_data.append([np.nan] * num_cols)
+    new_data.append([np.nan] * num_cols)
+    
+    # Header row
+    header_row = ['Compound', 'm/z', 'Retention time (min)']
+    for col_idx in range(sample_start_col, sample_end_col):
+        sample_name = str(data.iloc[0, col_idx])
+        if pd.notna(data.iloc[0, col_idx]):
+            # Clean sample name
+            for ext in ['.mzML', '.mzXML', '.raw', '.cdf', '.mzData']:
+                sample_name = sample_name.replace(ext, '')
+            sample_name = sample_name.replace(' Peak area', '').strip()
+            header_row.append(sample_name)
+    
+    new_data.append(header_row)
+    
+    # Data rows
+    for row_idx in range(1, len(data)):
+        mz_val = data.iloc[row_idx, mz_col]
+        rt_val = data.iloc[row_idx, rt_col]
         
-    df1 = pd.DataFrame([[np.nan] * len(data.columns)], columns=data.columns)
-    data = df1.append(data, ignore_index=True)
-    data = df1.append(data, ignore_index=True)
-    data.to_csv(file, header = False, index = False) #saves formatted backup for later use
+        # Create compound ID as RT_mz
+        if pd.notna(rt_val) and pd.notna(mz_val):
+            compound_id = f"{rt_val}_{mz_val}"
+        else:
+            compound_id = str(data.iloc[row_idx, id_col] if pd.notna(data.iloc[row_idx, id_col]) else row_idx)
+        
+        new_row = [compound_id, mz_val if pd.notna(mz_val) else '', rt_val if pd.notna(rt_val) else '']
+        
+        # Add sample data (only valid columns)
+        for col_idx in range(sample_start_col, sample_end_col):
+            new_row.append(data.iloc[row_idx, col_idx])
+        
+        new_data.append(new_row)
+    
+    # Save
+    result_df = pd.DataFrame(new_data)
+    result_df.to_csv(file, header=False, index=False)
 
 
 def reformat_msdial(file):

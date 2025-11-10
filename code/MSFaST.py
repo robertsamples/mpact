@@ -252,7 +252,7 @@ def run_MSFaST(self):
     if self.analysis_paramsgui.relfil:
         text += 'Features failing peak correction filtering: ' + str(len(self.ionfilters['relfil'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.ionfilters['relfil'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
     if self.analysis_paramsgui.blnkfltr: #FIX THIS REF TO "BLANKS"
-        text += 'Features failing blank filtering: ' + str(len(self.groupionlists['Blanks'])) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.groupionlists['Blanks']) / len(msdata_unformatted.index), 2)) + '%\n'
+        text += 'Features failing blank filtering: ' + str(len(self.groupionlists[analysis_params.blnkgrp])) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.groupionlists[analysis_params.blnkgrp]) / len(msdata_unformatted.index), 2)) + '%\n'
     if self.analysis_paramsgui.decon:
         text += 'Features failing blank filtering: ' + str(len(self.ionfilters['insource'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.ionfilters['insource'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
     if self.analysis_paramsgui.CVfil:

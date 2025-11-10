@@ -538,14 +538,14 @@ class UIFunctions(MainWindow):
 
     def getfragfilename(self):
             self.fragfilename, _ = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir,
-                                                                           "*.msp")
+                                                                           "*.msp *.mgf")
             self.recentdir = str(self.outputdir)
             self.fragfilename = Path(self.fragfilename)
             self.ui.lbl_msp.setText(self.fragfilename.name)
 
     def getgnpsfilename(self):
             self.gnpsfilename, _ = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir,
-                                                                           "*.txt")
+                                                                           "*.csv *.txt")
             self.gnpsfilename = Path(self.gnpsfilename)
             self.ui.lbl_gnpstable.setText(self.gnpsfilename.name)
 
