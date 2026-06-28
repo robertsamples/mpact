@@ -22,7 +22,11 @@ class groupset:  # parses the ions to be plotted as a specific color based on th
     Args:
     - name (str): The name of the group set.
     - query (query_parameters): A query_parameters object.
-    - iondictloc (str): The file path to the ion dictionary location.
+    - iondict (DataFrame): The ion dictionary, indexed by ``Compound``, with
+      a ``groups`` column. Callers already have this loaded in memory (it's
+      built immediately before every groupset is constructed) -- pass that
+      directly rather than a path, so each groupset doesn't re-read the same
+      file from disk (previously: once per Plot Feature Set configured).
 
     Attributes:
     - legendname (str): The legend name of the group set.
@@ -31,13 +35,12 @@ class groupset:  # parses the ions to be plotted as a specific color based on th
     - plotcol (str): The plot color of the group set.
     - ionlist (list of str): The ions to be plotted in the group set.
     """
-    def __init__(self, name, query, iondictloc):
+    def __init__(self, name, query, iondict):
         self.legendname = query.name
         self.excl = query.excl
         self.incl = query.incl
         self.plotcol = query.colour
-    
-        iondict = pd.read_csv(iondictloc, sep = ',', header = 0, index_col = 'Compound') #block adds average and median cv to iondict.csv, move elsewhere
+
         iondict = iondict.loc[iondict['groups'].notna(), 'groups'].to_frame()
         exclgrps = ' ' + '| '.join(self.excl)
         if len(exclgrps)>3: #only runs below line if there is an exclusion group
@@ -197,11 +200,15 @@ def run_MSFaST(self):
         iondict.loc[iondict['Compound'].isin(groupionlists[group]), 'groups'] += (' ' + str(group))
     iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=None)
 
-    # Add default filters to querylist
-    iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+    # Add default filters to querylist. Reuse the iondict already in memory
+    # (just written above, unchanged since) instead of re-reading it from
+    # disk -- and build the Compound-indexed view groupset needs once here,
+    # rather than each groupset() call below re-reading the file from disk
+    # itself (previously: once per Plot Feature Set configured).
+    iondict_by_compound = iondict.set_index('Compound')
     self.groupsets, self.filtereddfs = {}, {}
     for elem in analysis_params.querylist:
-        self.groupsets[elem] = groupset(elem, analysis_params.querydict[elem], analysis_params.outputdir / 'iondict.csv')
+        self.groupsets[elem] = groupset(elem, analysis_params.querydict[elem], iondict_by_compound)
         self.filtereddfs[elem] = filter.listfilter(iondict, self.groupsets[elem].ionlist, True)
 
 
