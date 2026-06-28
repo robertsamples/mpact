@@ -34,6 +34,7 @@ import files
 
 from MSFaST import run_MSFaST, analysis_parameters
 from groupsets import GroupSet, GroupSetModel, build_query_dict
+from plotslots import PlotSlotRegistry
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
@@ -270,13 +271,17 @@ class MainWindow(QMainWindow):
         
 
         
-        #initialize figure element dictionaries, can call with self.currplot as key
-        self.fig = {}
-        self.canvas = {}
-        self.pltlayout = {}
-        self.toolbar = {}
-        self.ax = {}
-        self.highlight = {}
+        # Per-plot widget/render state, one PlotSlot per plot name internally;
+        # these six attributes are dict-like views over that single registry
+        # (see plotslots.py) so existing self.fig['heatmap']-style call sites
+        # throughout plotting.py and main.py work unchanged.
+        self._plotslots = PlotSlotRegistry()
+        self.fig = self._plotslots.fig
+        self.canvas = self._plotslots.canvas
+        self.pltlayout = self._plotslots.pltlayout
+        self.toolbar = self._plotslots.toolbar
+        self.ax = self._plotslots.ax
+        self.highlight = self._plotslots.highlight
                 
         self.ui.btn_run.clicked.connect(self.run_analysis)
         self.ui.treeWidget.itemSelectionChanged.connect(self.on_tree_item_selection_changed)
@@ -836,10 +841,23 @@ class MainWindow(QMainWindow):
         """
         if self.ui.stackedWidget_plot.currentIndex() != 8 or self.ui.stackedWidget.currentIndex() != 3:
             return
-    
+
+        cmind = getattr(self, 'cmind', None)
+        heatind = getattr(self, 'heatind', None)
+        if not cmind or heatind is None:
+            return
+
+        # Clamp rather than wrap/raise: Python's negative indexing would
+        # silently jump to the opposite end of the list on underflow, and an
+        # unclamped index overflows with IndexError on the last row -- both
+        # triggerable just by holding W/S past either end of the heatmap.
+        new_heatind = max(0, min(len(cmind) - 1, heatind + shift))
+        if new_heatind == heatind:
+            return
+
         iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
         msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0]).iloc[:, 2:]
-        index = self.cmind[self.heatind + shift]
+        index = cmind[new_heatind]
         name = msdata.index.tolist()[index]
     
         self.ui.lbl_featurename.setText('Compound: ' + name)

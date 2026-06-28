@@ -135,6 +135,33 @@ hand-written widget-sync code in `ui_functions.py`, kept thin.
   it runs on every launch (including every Spyder "Run File", which
   re-executes `main.py`'s top level), so don't reintroduce a routine
   "checking/already installed" print; only report actual installs/failures.
+- Per-plot widget state (`self.fig`/`self.canvas`/`self.pltlayout`/
+  `self.toolbar`/`self.ax`/`self.highlight`) is backed by one
+  `PlotSlotRegistry` (`plotslots.py`), not six independent dicts — but the
+  six attributes are still dict-like views for backward compatibility, so
+  existing `self.canvas['heatmap']`-style call sites don't need to change.
+  When adding a 7th piece of per-plot state, add it to `PlotSlot`/`FIELDS`
+  in `plotslots.py` rather than a new bare dict on `MainWindow`.
+
+## Known refactor backlog (not yet done)
+
+Lower-priority siblings of the groupset/plot-slot refactors above,
+identified but intentionally deferred — pick up if/when touching this code
+for other reasons, not worth a dedicated pass on their own yet:
+
+- **`self.groups` can silently end up incomplete.** `getgroups()` rebuilds
+  this list and swallows per-row errors with a bare `except Exception:
+  print(...)`, continuing anyway. Several consumers (combo-boxes,
+  `UIFunctions.addgroup`) assume the list is complete with no signal if it
+  isn't. Consider failing loudly (or surfacing a UI warning) instead of a
+  silent partial list.
+- **`enumerate_inputs`/`loadsession` have no shared schema for
+  `analysis_parameters`.** ~40 fields each, hand-mirrored across `main.py`
+  (save) and `ui_functions.py` (restore) — every new param means editing
+  both by hand. Lower urgency than it sounds: `loadsession` already
+  restores each field independently (`restore()` helper), so a bad/missing
+  field can't cascade and take down the rest of restoration — the
+  remaining cost is pure maintenance friction, not a correctness risk.
 
 ## Refactor status (Jun 2026)
 
@@ -147,4 +174,7 @@ dependent `plot_abund` crash (`sns.barplot(x="index", ...)`), dependency-check
 console spam, and a stale `run.bat`/`MPACT.lnk` pointing at an old checkout
 location. Earlier bugfixes: highlight toggling on feature-info tab switches,
 and plot objects never (re)created when an optional output turns on
-mid-session. 57 passing tests.
+mid-session. Most recent follow-ups: heatmap W/S selection had no bounds
+clamping (`mv_heatmap`, could crash or silently wrap past either end of the
+feature list); the six per-plot dicts were consolidated into
+`PlotSlotRegistry` (`plotslots.py`). 65 passing tests.
