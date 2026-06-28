@@ -93,67 +93,72 @@ def stop_time():
 def importdata():
     """Function to import data from files and format it"""
     print('Loading files')
-    
-    extractmetadata = pd.read_csv(analysis_params.extractmetadatafilename, sep = ',', header = [0], index_col = None) #imports sample/extract metadata
-    samplelist = pd.read_csv(analysis_params.samplelistfilename, sep = ',', header = [0], index_col = None) #imports instrument sample list
-    combinedmetadata = extractmetadata.set_index('Sample_Code').join(samplelist.set_index('Sample_Code')).reset_index().set_index('Injection') #joins extract metadata and sample list by the sample code, looks like a god line probabaly best to move set index into the import
-    msdata = pd.read_csv(analysis_params.filename, sep = ',', header = None, index_col = [0, 1, 2], low_memory=False) #imports feature list
-    position = 0
-    for elem in msdata.iloc[1]: # itterates over header to format
-        msdata.iloc[1, position] = combinedmetadata.loc[msdata.iloc[2, position], 'Sample_Code']
-        msdata.iloc[0, position] = combinedmetadata.loc[msdata.iloc[2, position], 'Biological_Group']
-        position += 1 # increments current injection index
-    
+
     # Import sample/extract metadata
-    extractmetadata = pd.read_csv(analysis_params.extractmetadatafilename, 
+    extractmetadata = pd.read_csv(analysis_params.extractmetadatafilename,
                                    sep=',', header=0, index_col=None)
-    
+
     # Import instrument sample list
-    samplelist = pd.read_csv(analysis_params.samplelistfilename, 
+    samplelist = pd.read_csv(analysis_params.samplelistfilename,
                               sep=',', header=0, index_col=None)
-    
+
     # Join extract metadata and sample list by the sample code
     combinedmetadata = (extractmetadata.set_index('Sample_Code')
                         .join(samplelist.set_index('Sample_Code'))
                         .reset_index().set_index('Injection'))
-                    
-    
+
+
     # Import feature list
     msdata = pd.read_csv(analysis_params.filename, sep=',', header=None,
                           index_col=[0, 1, 2], low_memory=False)
-    
+
     # Iterate over header to format
     for position, elem in enumerate(msdata.iloc[1]):
         msdata.iloc[1, position] = combinedmetadata.loc[
             msdata.iloc[2, position], 'Sample_Code']
         msdata.iloc[0, position] = combinedmetadata.loc[
             msdata.iloc[2, position], 'Biological_Group']
-    
+
     # Write formatted peak table
     print('Writing formatted peak table')
-    msdata.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), 
+    msdata.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
                    header=False, index=True)
-    
-    # Import data from formatted peak table
-    msdata = pd.read_csv(analysis_params.outputdir / 
-                          (analysis_params.filename.stem + '_formatted.csv'), 
+
+    # Import data from formatted peak table. This re-read is a genuine
+    # reshape, not a redundant one: writing with header=False/index=True
+    # then reading back with header=[0, 1, 2]/index_col=[0] promotes the
+    # first 3 (already-edited) data rows into a 3-level column header and
+    # collapses the 3-level row index down to one level -- replicating that
+    # in memory would mean re-deriving exactly what pd.read_csv's header/
+    # index parsing does (dtype inference, NaN handling, etc.) by hand, the
+    # same category of subtle mismatch that caused the LossySetitemError
+    # fixed earlier. Not worth the risk for one disk round-trip.
+    msdata = pd.read_csv(analysis_params.outputdir /
+                          (analysis_params.filename.stem + '_formatted.csv'),
                           sep=',', header=[0, 1, 2], index_col=[0])
-    
+
     # Calculate mean of each row and drop rows with mean of 0
     msdataave = msdata.iloc[:, 2:].astype(float)
     msdataave['mean'] = msdataave.mean(axis=1, skipna=True)
     msdata = msdata[msdataave['mean'] != 0]
 
     # Save formatted peak table and original feature list
-    msdata.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), 
+    msdata.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
                    header=True, index=True)
-    msdata.to_csv(analysis_params.outputdir / (analysis_params.filename.name), 
+    msdata.to_csv(analysis_params.outputdir / (analysis_params.filename.name),
                    header=True, index=True)
-    
-    # Save feature dictionary with KMD for later use
-    iondict = pd.read_csv(analysis_params.outputdir / 
-                           (analysis_params.filename.stem + '_formatted.csv'), 
-                           sep=',', header=[2], index_col=None).iloc[:,:3]
+
+    # Build the feature dictionary (with KMD) from msdata already in memory
+    # instead of re-reading the file just written above with yet another
+    # header shape (header=[2], flattening the 3-level column header to its
+    # bottom level only). Equivalent to msdata.columns.get_level_values(2)
+    # plus resetting the index back to a plain Compound column -- verified
+    # against the previous disk-read version with real example data
+    # (identical values and dtypes) before relying on it here.
+    iondict = msdata.copy()
+    iondict.columns = iondict.columns.get_level_values(2)
+    iondict = iondict.reset_index().iloc[:, :3]
+    iondict.columns = ['Compound', 'm/z', 'Retention time (min)']
     iondict['kmd'] = iondict['m/z'] - np.floor(iondict['m/z'])
     iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=False)
 
