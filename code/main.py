@@ -6,6 +6,7 @@ Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 import re
 
 import sys
+import numpy as np
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
 import time
@@ -782,8 +783,13 @@ class MainWindow(QMainWindow):
 
         # Update volcano plot with the selected feature
         if self.analysis_paramsgui.Volcanoplt:
+            # 'logfc' is never persisted to iondict.csv -- plot_volcano
+            # computes it in-memory from 'fc' (np.log2(iondict['fc'])) each
+            # time it draws, rather than writing it back to disk. Derive it
+            # the same way here instead of indexing a column that doesn't
+            # exist in the file.
             self.highlight['volcano'].set_data(
-                [iondict.loc[self.pickedfeature, 'logfc']],
+                [np.log2(iondict.loc[self.pickedfeature, 'fc'])],
                 [iondict.loc[self.pickedfeature, '-logq']]
             )
             self.canvas['volcano'].draw_idle()
