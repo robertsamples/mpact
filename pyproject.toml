@@ -1,0 +1,9 @@
+[tool.ruff]
+extend-exclude = [
+    "code/ui_main.py",
+    "code/ui_main1.py",
+    "code/ui_featureinfo.py",
+    "code/ui_plotparam.py",
+    "code/files.py",
+    "code/files_rc.py",
+]
