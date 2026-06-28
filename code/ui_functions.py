@@ -4,7 +4,7 @@ Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 """
 
 ## ==> GUI FILE
-from main import MainWindow, query, start_functime, stop_functime, reset_runtime, ftrdialog, dialog
+from main import MainWindow, start_functime, stop_functime, reset_runtime, ftrdialog, dialog
 #import masstdriver #from old version of masst search push
 import webbrowser #may not be needed now
 from mzmineimport import format_check
@@ -283,15 +283,17 @@ class UIFunctions(MainWindow):
     def goto_abund(self):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(2)
-        self.highlight_feature(self.pickedfeature)
+        # Refresh (not re-select/toggle) the current feature's display now
+        # that the abundance tab is active.
+        self._refresh_highlight()
         UIFunctions.reset_ftrdialogbar(self)
         self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_activebtn)
-        
+
     def goto_hits(self):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(0)
-        
-        self.highlight_feature(self.pickedfeature)
+
+        self._refresh_highlight()
         UIFunctions.reset_ftrdialogbar(self)
         self.ftrdialog.ui.btn_hits.setStyleSheet(self.ui.ftbar_activebtn)
         
@@ -330,101 +332,100 @@ class UIFunctions(MainWindow):
     #colour buttons
     def colour_picker1(self):
         """
-        Allows user to pick a color from color dialog and sets the selected color to the selected query set's color attribute.
-
+        Allows user to pick a color from color dialog and sets the selected
+        groupset's colour attribute.
         """
         color = QColorDialog.getColor()
-        self.querys[self.selset].colour = color.name() 
-        self.ui.btn_col1.setStyleSheet("QPushButton {border: 2px solid lightgrey; background-color: " + str(self.querys[self.selset].colour) +";}")
-    
+        self.groupsetmodel.update(self.groupsetmodel.selected_index, colour=color.name())
+        self.ui.btn_col1.setStyleSheet("QPushButton {border: 2px solid lightgrey; background-color: " + str(self.groupsetmodel.selected.colour) +";}")
+
     def updatesets(self):
         """
-        Updates the list of query sets in the GUI and sets the selected query set.
-
+        Rebuilds the groupset list widget from the model and restores selection.
         """
         selitem = self.ui.listWidget_pltgrps.currentRow() - 1
         selitem = max(selitem, 0)
-        
+
         self.ui.listWidget_pltgrps.clear()
-        for query in self.querys:
-            item = QListWidgetItem(query.name)
+        for groupset in self.groupsetmodel:
+            item = QListWidgetItem(groupset.name)
             item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
             self.ui.listWidget_pltgrps.addItem(item)
-    
+
         self.ui.listWidget_pltgrps.setCurrentRow(selitem)
         UIFunctions.updategroups(self)
-        
-    
+
+
     def updategroups(self):
         """
-        Updates the lists of groups for the selected query set in the GUI.
+        Syncs the three group-membership lists (and colour swatch) in the GUI
+        to the currently-selected groupset in the model.
         """
-        selgroup = self.ui.listWidget_pltgrps.currentRow()
-        self.selset = selgroup
-    
+        selgroup = self.groupsetmodel.select(self.ui.listWidget_pltgrps.currentRow())
+
         self.ui.listWidget_allgrps.clear()
         self.ui.listWidget_orgrps.clear()
         self.ui.listWidget_andgrps.clear()
-    
-        for group in self.querys[selgroup].excl:
+
+        groupset = self.groupsetmodel.selected
+        if groupset is None:
+            return
+
+        for group in groupset.excl:
             self.ui.listWidget_allgrps.addItem(QListWidgetItem(group))
-        for group in self.querys[selgroup].src:
+        for group in groupset.src:
             self.ui.listWidget_orgrps.addItem(QListWidgetItem(group))
-        for group in self.querys[selgroup].incl:
+        for group in groupset.incl:
             self.ui.listWidget_andgrps.addItem(QListWidgetItem(group))
-    
+
         self.ui.btn_col1.setStyleSheet(
-            "QPushButton {border: 2px solid lightgrey; background-color: " + 
-            str(self.querys[self.selset].colour) +";}"
+            "QPushButton {border: 2px solid lightgrey; background-color: " +
+            str(groupset.colour) +";}"
         )
-    
+
     def writegroups(self):
         """
-        Writes the changes made to the query set's name, included groups, excluded groups, and source groups in the GUI to the query object.
+        Writes the GUI's groupset name/included/excluded/source-group widgets
+        back into the model for the currently-selected groupset.
         """
-        if 0 <= self.selset < self.ui.listWidget_pltgrps.count():
+        selset = self.groupsetmodel.selected_index
+        if 0 <= selset < self.ui.listWidget_pltgrps.count():
             try:
-                self.querys[self.selset].name = self.ui.listWidget_pltgrps.item(self.selset).text()
+                name = self.ui.listWidget_pltgrps.item(selset).text()
             except Exception:
-                pass
-    
-            self.querys[self.selset].excl = [self.ui.listWidget_allgrps.item(x).text() for x in range(self.ui.listWidget_allgrps.count())]
-            self.querys[self.selset].src = [self.ui.listWidget_orgrps.item(x).text() for x in range(self.ui.listWidget_orgrps.count())]
-            self.querys[self.selset].incl = [self.ui.listWidget_andgrps.item(x).text() for x in range(self.ui.listWidget_andgrps.count())]
-    
+                name = None
+
+            self.groupsetmodel.update(
+                selset,
+                name=name,
+                excl=[self.ui.listWidget_allgrps.item(x).text() for x in range(self.ui.listWidget_allgrps.count())],
+                src=[self.ui.listWidget_orgrps.item(x).text() for x in range(self.ui.listWidget_orgrps.count())],
+                incl=[self.ui.listWidget_andgrps.item(x).text() for x in range(self.ui.listWidget_andgrps.count())],
+            )
+
         UIFunctions.updategroups(self)
-        
-        
+
+
     def addgroup(self, name = 'New Feature Set'):
         """
-        Adds a new query set to the list of query sets in the GUI and to the querys list.
+        Adds a new groupset (excluding every known biological group by
+        default) to the model and the GUI list.
         """
         item = QListWidgetItem(name)
         item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
-        
+
         self.ui.listWidget_pltgrps.addItem(item)
         item.setSelected(True)
-        
-        currquery = query()
-        currquery.name = item.text()
-        currquery.src = []
-        currquery.incl = []
-        currquery.excl = []
-        currquery.color = '#000000'
-        
-        for group in self.groups:
-            currquery.excl.append(group)
-            
-        self.querys.append(currquery)
+
+        self.groupsetmodel.add(item.text(), all_groups=self.groups)
         self.ui.listWidget_pltgrps.setCurrentItem(item)
 
-            
+
     def removegroup(self):
         """
-        Removes the selected query set from the list of query sets in the GUI and from the querys list.
+        Removes the selected groupset from the model and the GUI list.
         """
-        selitem = self.ui.listWidget_pltgrps.currentRow()
-        self.querys.remove(self.querys[selitem])
+        self.groupsetmodel.remove(self.ui.listWidget_pltgrps.currentRow())
         UIFunctions.updatesets(self)
         
         
@@ -632,5 +633,5 @@ class UIFunctions(MainWindow):
     def show_ftrdialog(self):
         self.ftrdialog.show()
         if self.pickedfeature != '':
-            self.highlight_feature(self.pickedfeature)
+            self._refresh_highlight()
 
