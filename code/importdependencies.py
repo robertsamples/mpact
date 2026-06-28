@@ -65,14 +65,18 @@ def install(package):
 def checkdep():
     """Install any missing dependencies.
 
+    Silent when every dependency is already present -- this runs on every
+    launch (including every Spyder "Run File", which re-executes main.py's
+    top level), so printing a "checking/already installed" block every time
+    is pure console noise once the environment is set up. Only installs (or
+    failures) are reported.
+
     Returns a list of the pip package names that were freshly installed (these
     may require an interpreter/kernel restart before they can be imported).
     """
-    print("Checking dependencies")
     installed = []
     for pip_name, import_name in DEPENDENCIES.items():
         if _is_available(import_name):
-            print(import_name + " already installed")
             continue
         print("Installing " + pip_name)
         try:

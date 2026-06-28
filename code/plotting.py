@@ -80,6 +80,30 @@ class NavigationToolbar(NavigationToolbar2QT):
             button.clicked.connect(lambda: parent.dialog.show())
             self.addWidget(button)
         
+def _is_duplicate_pick(parent, event):
+    """True if this pick event's underlying mouse click already triggered a
+    pick on another overlapping artist.
+
+    Matplotlib fires one ``pick_event`` per artist whose hit-test matches a
+    click, not one per click. When the same feature is plotted in more than
+    one groupset/colour layer (separate ``ax.scatter()`` calls at the same
+    coordinates), clicking it fires our callback once per overlapping layer
+    for a single physical click. Each call reselects the same feature, which
+    -- because selecting an already-selected feature toggles the highlight
+    off -- made the net result of clicking an overplotted feature an
+    immediate deselect. Deduplicating by the shared ``mouseevent`` (every pick
+    event from one click carries the same ``mouseevent`` instance) makes one
+    click produce exactly one selection regardless of how many layers it hits.
+    """
+    mouseevent = getattr(event, 'mouseevent', None)
+    if mouseevent is None:
+        return False
+    if getattr(parent, '_last_pick_mouseevent', None) is mouseevent:
+        return True
+    parent._last_pick_mouseevent = mouseevent
+    return False
+
+
 #General plot method#
 class ui_plot:
     """
@@ -122,9 +146,13 @@ class ui_plot:
         parent.ax[currplt].set_facecolor(self.plotbackground)
 
     def onpick(self, event, parent, iondict, plotcols):
+        if _is_duplicate_pick(parent, event):
+            return
         ind = event.ind
         coord = event.artist.get_offsets()[ind, :]
         pickedfeature = iondict.loc[iondict[plotcols[0]] == coord[0, 0], :].loc[iondict[plotcols[1]] == coord[0, 1], :]
+        if pickedfeature.empty:
+            return
         parent.ui.lbl_featurename.setText('Compound: ' + str(pickedfeature.iloc[0, 0]))
         parent.ui.lbl_featurert.setText('Retention time: ' + str(round(pickedfeature.iloc[0, 2], 4)))
         parent.ui.lbl_featuremz.setText('m/z: ' + str(round(pickedfeature.iloc[0, 1], 4)))
@@ -203,6 +231,12 @@ class plot_abund():
         ionsummary['neff'] = neff
         if parent.analysis_paramsgui.blnkfltr:
             ionsummary = ionsummary.drop([parent.analysis_paramsgui.blnkgrp], axis=0)
+        # Force the index to be unnamed before resetting it, so the new column
+        # is always literally named "index" (used below by sns.barplot) --
+        # newer pandas versions can carry a level name through droplevel()
+        # where older ones silently dropped it, which otherwise renames this
+        # column out from under the hardcoded x="index" reference.
+        ionsummary.index.name = None
         ionsummary = ionsummary.reset_index()
     
         # Define the plotting function for stripplot
@@ -213,8 +247,8 @@ class plot_abund():
         # Define the plotting function for pointplot
         def plot_pointplot():
             sns.pointplot(ax=parent.ax[currplt][1], x="sample", y="abundance", color="#999999",
-                          data=msdata, dodge=False, join=False, markers="d", scale=.75,
-                          zorder=1, capsize=.1, errwidth=1, ci=95)
+                          data=msdata, dodge=False, linestyle='none', markers="d", markersize=6,
+                          zorder=1, capsize=.1, err_kws={'linewidth': 1}, errorbar=('ci', 95))
     
         # Define a list of plotting functions to be run in parallel
         plot_functions = [plot_stripplot, plot_pointplot]
@@ -378,6 +412,8 @@ class plot_heatmap():
         def onpick8(event): #rename
                 # this gets the position of the selected item, finds the item in the reodered index,
                 # and highlights the feature by name on other plots
+            if _is_duplicate_pick(parent, event):
+                return
             iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep = ',', header = [0], index_col = [0])
             coord = [event.mouseevent.xdata,event.mouseevent.ydata]
             parent.heatind = int(np.floor(coord[1]))
@@ -896,10 +932,14 @@ class plot_PCA(ui_plot):
         parent.pickedsample = pd.DataFrame(0, index=['empty'], columns=['empty'])
         
         def picksample(event): # fix this
+            if _is_duplicate_pick(parent, event):
+                return
             ind = event.ind
             coord = event.artist.get_offsets()[ind,:]
             newsample = principalDf.loc[principalDf.iloc[:,0] == coord[0,0], :].loc[principalDf.iloc[:,1] == coord[0,1], :].reset_index()
-            
+            if newsample.empty:
+                return
+
             if newsample.iloc[0,0] == parent.pickedsample.iloc[0,0] and self.highlightcol != (0, 0, 0, 0):
                 self.highlightcol = (0, 0, 0, 0)
             else:
