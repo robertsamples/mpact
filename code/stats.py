@@ -211,8 +211,10 @@ def runfc(analysis_params, statstgrps):
     maxvals = msdata_errprop.max(axis=1) #the max stuff is used to base point opacity based on abundance, have to put in a better location than this
     msdata_errprop = msdata_errprop.loc[:, msdata_errprop.columns.intersection(statstgrps)]
     msdata_errprop['FC']=msdata_errprop[statstgrps[0]]/msdata_errprop[statstgrps[1]]
-    msdata_errprop['FC'][msdata_errprop['FC'] >= maxval] = maxval
-    msdata_errprop['FC'][msdata_errprop['FC'] <= minval] = minval
+    # Use .loc (single-step assignment) instead of chained assignment, which is
+    # deprecated and will stop updating the frame in pandas 3.0.
+    msdata_errprop.loc[msdata_errprop['FC'] >= maxval, 'FC'] = maxval
+    msdata_errprop.loc[msdata_errprop['FC'] <= minval, 'FC'] = minval
     msdata_errprop['max'] = maxvals # this has to be done before resetting the index or else tuple/string expectation error thrown
     msdata_errprop = msdata_errprop.reset_index([1,2])
     iondict['fc'] = msdata_errprop['FC']

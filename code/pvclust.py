@@ -17,7 +17,14 @@ import numpy as np
 
 from scipy.stats import norm, chi2
 from scipy.cluster.hierarchy import (dendrogram, set_link_color_palette,
-                                     leaves_list, to_tree, linkage)
+                                     leaves_list, to_tree)
+# fastcluster.linkage is a drop-in for scipy's linkage that produces identical
+# results much faster -- a big win here because bootstrap clustering calls it
+# thousands of times. Fall back to scipy when fastcluster isn't installed.
+try:
+    from fastcluster import linkage
+except ImportError:
+    from scipy.cluster.hierarchy import linkage
 import matplotlib.pyplot as plt
 
 from sklearn.linear_model import LinearRegression

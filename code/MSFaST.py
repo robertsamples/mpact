@@ -76,7 +76,7 @@ def importdata():
     extractmetadata = pd.read_csv(analysis_params.extractmetadatafilename, sep = ',', header = [0], index_col = None) #imports sample/extract metadata
     samplelist = pd.read_csv(analysis_params.samplelistfilename, sep = ',', header = [0], index_col = None) #imports instrument sample list
     combinedmetadata = extractmetadata.set_index('Sample_Code').join(samplelist.set_index('Sample_Code')).reset_index().set_index('Injection') #joins extract metadata and sample list by the sample code, looks like a god line probabaly best to move set index into the import
-    msdata = pd.read_csv(analysis_params.filename, sep = ',', header = None, index_col = [0, 1, 2]) #imports feature list
+    msdata = pd.read_csv(analysis_params.filename, sep = ',', header = None, index_col = [0, 1, 2], low_memory=False) #imports feature list
     position = 0
     for elem in msdata.iloc[1]: # itterates over header to format
         msdata.iloc[1, position] = combinedmetadata.loc[msdata.iloc[2, position], 'Sample_Code']
@@ -98,8 +98,8 @@ def importdata():
                     
     
     # Import feature list
-    msdata = pd.read_csv(analysis_params.filename, sep=',', header=None, 
-                          index_col=[0, 1, 2])
+    msdata = pd.read_csv(analysis_params.filename, sep=',', header=None,
+                          index_col=[0, 1, 2], low_memory=False)
     
     # Iterate over header to format
     for position, elem in enumerate(msdata.iloc[1]):

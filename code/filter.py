@@ -409,7 +409,7 @@ def mergeions(analysis_params, ion_filters):
     msdata_merged.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), header=True, index=True)
 
     # Format the merged data frame and save it
-    msdata_merged = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), sep=',', header=None, index_col=None)
+    msdata_merged = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), sep=',', header=None, index_col=None, low_memory=False)
     msdata_merged.iloc[2, 0:3] = ['Compound', 'm/z', 'Retention time (min)']
     msdata_merged.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), header=False, index=False)
 
@@ -424,7 +424,7 @@ def applyfilters(analysis_params, ion_filters):
     Returns:
         None
     """
-    ms_data_out_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), sep=',', header=None, index_col=None)  # reopen original data
+    ms_data_out_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), sep=',', header=None, index_col=None, low_memory=False)  # reopen original data
     for elem in ion_filters:
         ms_data_out_filtered = listfilter(ms_data_out_filtered, ion_filters[elem].ions, False)
     ms_data_out_filtered.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'), index=False, header=False)  # saves output

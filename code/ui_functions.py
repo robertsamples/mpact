@@ -431,69 +431,106 @@ class UIFunctions(MainWindow):
         
     #import buttons
     def loadsession(self):
-            """
-            Displays a file dialog to get the saved session file, calls the `read_save` method in `main.py` to read the saved 
-            data and updates the UI elements with the saved parameters.
-            """
-            try:
-                self.savefile, _  = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir , 
-                                                                               "*.mpct")
-                self.savefile = Path(self.savefile)
-                self.recentdir = str(self.savefile.parent)
-                self.read_save(self.savefile)
-                
-                self.ui.lbl_pktbl.setText(self.filename.name)
-                self.ui.lbl_spllist.setText(self.samplelistfilename.name)
-                self.ui.lbl_splmdt.setText(self.extractmetadatafilename.name)
-                self.ui.lbl_msp.setText(self.fragfilename.name)
-                if len(str(self.outputdir)) <40:
-                    self.ui.lbl_outdir.setText(self.outputdir)
-                else:
-                    self.ui.lbl_outdir.setText('...' + str(self.outputdir)[-40:])
-                
-                self.ui.checkBox_cv.setChecked('cv' in self.analysis_paramsgui.graphfilters) # may be good to add seperate parameters for each filter instead of using str?
-                self.ui.radioButton_meancv.setChecked('average' in self.analysis_paramsgui.cvparam)
-                self.ui.radioButton_medcv.setChecked('median' in self.analysis_paramsgui.cvparam)
-                self.ui.lineEdit_cvthresh.setText(str(self.analysis_paramsgui.cvthresh))
-                self.ui.checkBox_mp.setChecked('rel' in self.analysis_paramsgui.graphfilters)
-                self.ui.lineEdit_rtwin.setText(str(self.analysis_paramsgui.RTwin))
-                self.ui.lineEdit_isowin.setText(str(self.analysis_paramsgui.isopeakwin))
-                self.ui.combo_maxisoshift.setCurrentIndex(self.analysis_paramsgui.maxisowin)
-                self.ui.checkBox_decon.setChecked('insource' in self.analysis_paramsgui.graphfilters)
-                self.ui.lineEdit_insourcethresh.setText(str(self.analysis_paramsgui.deconthresh))
-                self.ui.checkBox_blankfilter.setChecked(self.analysis_paramsgui.blnkfltr)
-                self.ui.combo_blankfil_name.setCurrentText(str(self.analysis_paramsgui.blnkgrp))
-                self.ui.radioButton_meancv.setChecked('average' in self.analysis_paramsgui.cvparam)
-                if 'absolute' in self.analysis_paramsgui.blankfilparam:
-                    self.ui.lineEdit_blankfilter_absthresh.setText(str(self.analysis_paramsgui.blankfilthresh))
-                    self.ui.radioButton_blankfilter_abs.setChecked(True)
-                else:
-                    self.ui.lineEdit_blankfilter_relthresh.setText(str(self.analysis_paramsgui.blankfilthresh))
-                    self.ui.radioButton_blankfilter_rel.setChecked(True)
-                
+        """Open a saved ``.mpct`` session and restore every input/parameter widget.
 
-                self.ui.checkBox_pca.setChecked(self.analysis_paramsgui.PCA)
-                self.ui.checkBox_dend.setChecked(self.analysis_paramsgui.Dendrogram)
-                self.ui.checkBox_mzrt.setChecked(self.analysis_paramsgui.MZRTplt)
-                self.ui.checkBox_kmd.setChecked(self.analysis_paramsgui.KMD)
-                self.ui.checkBox_fc.setChecked(self.analysis_paramsgui.FC)
-                self.ui.checkBox_3dfc.setChecked(self.analysis_paramsgui.FC3Dplt)
-                self.ui.checkBox_ttest.setChecked(self.analysis_paramsgui.Ttest)
-                self.ui.checkBox_volcano.setChecked(self.analysis_paramsgui.Volcanoplt)
-                
-                self.ui.checkBox_FDR.setChecked(self.analysis_paramsgui.FDR)
-                self.dialog.ui.checkBox_bootstrap.setChecked(self.analysis_paramsgui.bootstrap)
-                self.ui.combo_expgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[0]))
-                self.ui.combo_ctrgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[1]))
-                
-                self.dialog.ui.combo_colorscheme.setCurrentText(self.analysis_paramsgui.colorscheme)
-                self.dialog.ui.lineEdit_pqthresh.setText(str(self.analysis_paramsgui.pqthresh))
-                self.dialog.ui.lineEdit_fcthresh.setText(str(self.analysis_paramsgui.fcthresh))
-                self.dialog.ui.checkBox_mdguide.setChecked(self.analysis_paramsgui.mdguide)
-            except Exception:
-               #self.error('Files in use, Close before analysis')
-               pass
-               return()
+        Opening the file is fatal if it fails, but each parameter is then
+        restored independently so a single missing/renamed field (e.g. from an
+        older save file) cannot silently abort restoration of the rest. The
+        previous implementation wrapped the whole body in ``try/except: pass``,
+        so the first failing widget (notably ``combo_maxisoshift``, which was
+        being given a float index that raises ``TypeError`` in PyQt5) left every
+        later parameter un-restored.
+        """
+        savefile, _ = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir, "*.mpct")
+        if not savefile:
+            return
+        self.savefile = Path(savefile)
+        self.recentdir = str(self.savefile.parent)
+        try:
+            self.read_save(self.savefile)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.error('Could not open session file (see console)')
+            return
+
+        p = self.analysis_paramsgui
+
+        def restore(what, action):
+            try:
+                action()
+            except Exception as exc:
+                print('Warning: could not restore ' + what + ': ' + str(exc))
+
+        def set_maxiso():
+            # maxisowin is stored as a float (e.g. 3.0); map it to the matching
+            # combo item by text rather than passing a float as an index.
+            combo = self.ui.combo_maxisoshift
+            for cand in (str(int(p.maxisowin)), str(p.maxisowin)):
+                idx = combo.findText(cand)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                    return
+
+        def set_blankfil():
+            if 'absolute' in p.blankfilparam:
+                self.ui.lineEdit_blankfilter_absthresh.setText(str(p.blankfilthresh))
+                self.ui.radioButton_blankfilter_abs.setChecked(True)
+            else:
+                self.ui.lineEdit_blankfilter_relthresh.setText(str(p.blankfilthresh))
+                self.ui.radioButton_blankfilter_rel.setChecked(True)
+
+        # ----- input file path labels -----
+        restore('peak table label', lambda: self.ui.lbl_pktbl.setText(self.filename.name))
+        restore('sample list label', lambda: self.ui.lbl_spllist.setText(self.samplelistfilename.name))
+        restore('metadata label', lambda: self.ui.lbl_splmdt.setText(self.extractmetadatafilename.name))
+        restore('fragment file label', lambda: self.ui.lbl_msp.setText(Path(self.fragfilename).name if self.fragfilename else ''))
+        restore('output dir label', lambda: self.ui.lbl_outdir.setText(
+            str(self.outputdir) if len(str(self.outputdir)) < 40 else '...' + str(self.outputdir)[-40:]))
+
+        # ----- filtering parameters -----
+        restore('CV filter', lambda: self.ui.checkBox_cv.setChecked('cv' in p.graphfilters))
+        restore('mean CV radio', lambda: self.ui.radioButton_meancv.setChecked('average' in p.cvparam))
+        restore('median CV radio', lambda: self.ui.radioButton_medcv.setChecked('median' in p.cvparam))
+        restore('CV threshold', lambda: self.ui.lineEdit_cvthresh.setText(str(p.cvthresh)))
+        restore('mispick filter', lambda: self.ui.checkBox_mp.setChecked('rel' in p.graphfilters))
+        restore('merge ions', lambda: self.ui.checkBox_merge.setChecked(getattr(p, 'merge', False)))
+        restore('RT window', lambda: self.ui.lineEdit_rtwin.setText(str(p.RTwin)))
+        restore('ringing window', lambda: self.ui.lineEdit_ringwin.setText(str(getattr(p, 'ringingwin', ''))))
+        restore('isotope window', lambda: self.ui.lineEdit_isowin.setText(str(p.isopeakwin)))
+        restore('max isotope shift', set_maxiso)
+        restore('deconvolution filter', lambda: self.ui.checkBox_decon.setChecked('insource' in p.graphfilters))
+        restore('deconvolution threshold', lambda: self.ui.lineEdit_insourcethresh.setText(str(getattr(p, 'deconthresh', ''))))
+
+        # ----- blank filter -----
+        restore('blank filter', lambda: self.ui.checkBox_blankfilter.setChecked(p.blnkfltr))
+        restore('blank group', lambda: self.ui.combo_blankfil_name.setCurrentText(str(p.blnkgrp)))
+        restore('blank filter mode', set_blankfil)
+
+        # ----- database search -----
+        restore('kingdom', lambda: self.ui.combo_kingdom.setCurrentText(str(getattr(p, 'kingdom', ''))))
+        restore('genus', lambda: self.ui.lineEdit_genus.setText(str(getattr(p, 'genus', ''))))
+        restore('ppm threshold', lambda: self.ui.lineEdit_ppmthresh.setText(str(getattr(p, 'ppmthresh', ''))))
+
+        # ----- plot toggles -----
+        restore('PCA', lambda: self.ui.checkBox_pca.setChecked(p.PCA))
+        restore('dendrogram', lambda: self.ui.checkBox_dend.setChecked(p.Dendrogram))
+        restore('m/z-RT plot', lambda: self.ui.checkBox_mzrt.setChecked(p.MZRTplt))
+        restore('KMD plot', lambda: self.ui.checkBox_kmd.setChecked(p.KMD))
+        restore('fold change', lambda: self.ui.checkBox_fc.setChecked(p.FC))
+        restore('3D fold change', lambda: self.ui.checkBox_3dfc.setChecked(p.FC3Dplt))
+        restore('t-test', lambda: self.ui.checkBox_ttest.setChecked(p.Ttest))
+        restore('volcano', lambda: self.ui.checkBox_volcano.setChecked(p.Volcanoplt))
+        restore('FDR', lambda: self.ui.checkBox_FDR.setChecked(p.FDR))
+        restore('bootstrap', lambda: self.dialog.ui.checkBox_bootstrap.setChecked(p.bootstrap))
+
+        # ----- statistics / plot params -----
+        restore('experimental group', lambda: self.ui.combo_expgrp.setCurrentText(str(p.statstgrps[0])))
+        restore('control group', lambda: self.ui.combo_ctrgrp.setCurrentText(str(p.statstgrps[1])))
+        restore('colour scheme', lambda: self.dialog.ui.combo_colorscheme.setCurrentText(p.colorscheme))
+        restore('p/q threshold', lambda: self.dialog.ui.lineEdit_pqthresh.setText(str(p.pqthresh)))
+        restore('fold-change threshold', lambda: self.dialog.ui.lineEdit_fcthresh.setText(str(p.fcthresh)))
+        restore('mass defect guide', lambda: self.dialog.ui.checkBox_mdguide.setChecked(p.mdguide))
                 
     def getfilename(self):
             self.filename, _  = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir ,

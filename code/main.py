@@ -18,6 +18,11 @@ from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime
 from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
 from pathlib import Path
 
+# Install/verify non-stock dependencies (epam.indigo, UpSetPlot, squarify)
+# before the modules that import them are loaded below.
+from importdependencies import ensure_dependencies
+ensure_dependencies()
+
 # GUI FILE
 from ui_main import Ui_MainWindow
 import ui_plotparam
@@ -117,6 +122,31 @@ class query:
         self.incl = ''  # and groups, feature must be in
         self.excl = ''  # not groups, feature must not be in
         self.colour = '#000000'
+
+
+class AnalysisWorker(QObject):
+    """Runs the heavy, Qt-free computation (``run_MSFaST``) on a worker thread.
+
+    Only the pure pandas/numpy/file-I/O step is moved off the GUI thread;
+    matplotlib/Qt plot generation must stay on the main thread and runs in
+    ``MainWindow._finish_analysis`` once ``finished`` is emitted.
+    """
+    finished = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(self, window):
+        QObject.__init__(self)
+        self.window = window
+
+    def run(self):
+        try:
+            run_MSFaST(self.window)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.failed.emit('Processing failed (see console)')
+            return
+        self.finished.emit()
 
 
 fullruntime = 0
@@ -498,7 +528,7 @@ class MainWindow(QMainWindow):
             self.error('Data read failure: Check input files')
             return
     
-        msdata = pd.read_csv(self.filename, sep=',', header=None, index_col=[0, 1, 2])
+        msdata = pd.read_csv(self.filename, sep=',', header=None, index_col=[0, 1, 2], low_memory=False)
         groups = []
     
         for elem in msdata.iloc[2]:
@@ -599,26 +629,6 @@ class MainWindow(QMainWindow):
 
 
     
-    def onItemClicked():
-        if len(self.ftrdialog.ui.treeWidget.selectedItems()) > 0:
-            item = self.ftrdialog.ui.treeWidget.selectedItems()[0]
-            smiles = item.text(5)
-            if smiles:
-                try:
-                    m = indigo.loadMolecule(smiles)
-                    indigo.setOption('render-image-size', '400,400')
-                    image_path = f'compoundimages/{item.text(0)}.png'
-                    renderer.renderToFile(m, image_path)
-                    pixmap = QPixmap(image_path)
-                    pixmap2 = pixmap.scaled(400, 400, QtCore.Qt.KeepAspectRatio)
-                    self.ftrdialog.ui.label.setPixmap(pixmap2)
-                except Exception as e:
-                    print(f"Error rendering molecule for {item.text(0)}: {e}")
-                    # Optionally, display a default image or message
-            else:
-                print(f"No SMILES string available for {item.text(0)}")
-                # Handle the case where SMILES is empty
-            
     def on_tree_item_selection_changed(self):
         selected_items = self.ui.treeWidget.selectedItems()
         if selected_items:
@@ -853,35 +863,161 @@ class MainWindow(QMainWindow):
         
         
     def write_save(self):
-        """Writes the current analysis session to a pickle file.
+        """Write the current analysis session to a ``.mpct`` (pickle) file.
+
+        Each component is captured defensively, so that one unreadable input
+        (e.g. a file held open by another program) does not abort the whole
+        save. The pickle is written to a temporary file that atomically
+        replaces the target, so an interrupted save cannot corrupt an existing
+        ``.mpct``.
         """
-        self.analysis_paramsgui.queries = self.querys # WRITES QUERY DB FOR GROUPSETS IN ANALYSISPARAMETERS, WILL NEED TO CHANGE WHEN MVC IMPLEMENTED
-        file_pi = open(self.analysis_paramsgui.outputdir/(self.analysis_paramsgui.filename.stem + '.mpct'), 'wb')
-        self.savedata['parameters'] = self.analysis_paramsgui
-        self.savedata['peaktable'] = pd.read_csv(self.analysis_paramsgui.outputdir / self.analysis_paramsgui.filename.name, sep = ',', header = None, index_col = None)
-        self.savedata['samplelist'] = pd.read_csv(self.samplelistfilename, sep = ',', header = None, index_col = None)
-        self.savedata['extractmetadata'] = pd.read_csv(self.extractmetadatafilename , sep = ',', header = None, index_col = None)
-        if self.analysis_paramsgui.fragfilename != '':
-            fragmsp = open(self.analysis_paramsgui.fragfilename, 'r')     
-            self.savedata['fragdb'] = fragmsp.read()
-            fragmsp.close()
+        params = self.analysis_paramsgui
+        params.queries = self.querys  # persist groupsets (revisit when MVC lands)
+
+        def _capture(label, reader, default=None):
+            try:
+                return reader()
+            except Exception:
+                import traceback
+                print('Warning: could not capture ' + label + ' for save:')
+                traceback.print_exc()
+                return default
+
+        savedata = dict(self.savedata)
+        savedata['parameters'] = params
+        savedata['peaktable'] = _capture(
+            'peak table',
+            lambda: pd.read_csv(params.outputdir / params.filename.name, sep=',', header=None, index_col=None, low_memory=False))
+        savedata['samplelist'] = _capture(
+            'sample list',
+            lambda: pd.read_csv(self.samplelistfilename, sep=',', header=None, index_col=None))
+        savedata['extractmetadata'] = _capture(
+            'extract metadata',
+            lambda: pd.read_csv(self.extractmetadatafilename, sep=',', header=None, index_col=None))
+        if params.fragfilename != '':
+            savedata['fragdb'] = _capture(
+                'fragment database',
+                lambda: Path(params.fragfilename).read_text(), default='None')
         else:
-            self.savedata['fragdb'] = 'None'
-        pickle.dump(self.savedata, file_pi)
-        file_pi.close()
+            savedata['fragdb'] = 'None'
+        self.savedata = savedata
+
+        target = params.outputdir / (params.filename.stem + '.mpct')
+        tmp = target.with_name(target.name + '.tmp')
+        try:
+            with open(tmp, 'wb') as file_pi:
+                pickle.dump(savedata, file_pi)
+            os.replace(tmp, target)  # atomic replace on the same filesystem
+        except Exception:
+            import traceback
+            print('Error saving .mpct file:')
+            traceback.print_exc()
+            self.error('Analysis complete but save failed (see console)')
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
     
+    def export_filtered_outputs(self):
+        """Write post-filter exports next to the analysis output (best-effort).
+
+        - The filtered peak table in its source layout (a row subset of the
+          input file; matched by compound id, falling back to m/z + RT).
+        - If a fragmentation file is loaded, an MSP/MGF re-indexed so its entry
+          IDs match the filtered peak-table row order -- the form GNPS2 expects.
+
+        Failures are logged and never abort the analysis.
+        """
+        import translators
+        params = self.analysis_paramsgui
+        filtered_internal = params.outputdir / (params.filename.stem + '_filtered.csv')
+
+        try:
+            source = Path(params.filename)
+            out = params.outputdir / (params.filename.stem + '_filtered_source' + source.suffix)
+            count = translators.filter_source_peaktable(source, filtered_internal, out)
+            print('Wrote filtered source peak table (' + str(count) + ' features): ' + str(out))
+        except Exception:
+            import traceback
+            print('Could not export filtered source peak table:')
+            traceback.print_exc()
+
+        fragfile = getattr(params, 'fragfilename', '')
+        if fragfile:
+            try:
+                fragpath = Path(fragfile)
+                out = params.outputdir / (fragpath.stem + '_reindexed' + fragpath.suffix)
+                count = translators.reindex_fragments(filtered_internal, fragpath, out)
+                print('Wrote GNPS2 re-indexed fragments (' + str(count) + ' entries): ' + str(out))
+            except Exception:
+                import traceback
+                print('Could not re-index fragmentation file:')
+                traceback.print_exc()
+
+    def safe_generate(self, label, func, *args, **kwargs):
+        """Run a plot/generation step so a single failure is non-fatal.
+
+        Logs the traceback and notes the failure in the status bar, then
+        returns None so the remaining plots are still generated.
+        """
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            import traceback
+            print('Error generating ' + label + ':')
+            traceback.print_exc()
+            self.ui.label_status.setText('Warning: ' + label + ' failed (see console)')
+            return None
+
     def run_analysis(self):
+        # Ignore re-clicks while an analysis is already running on the worker thread.
+        if getattr(self, '_analysis_thread', None) is not None and self._analysis_thread.isRunning():
+            return
         self.dbsearchdone = False
         start_functime()
         self.enumerate_inputs()
         print('')
         stop_functime('inputs obtained')
         
-        # Insert working signal here, will likely need multithreading
-        run_MSFaST(self)
+        # Heavy, Qt-free computation runs on a worker thread so the GUI stays
+        # responsive; plotting resumes on the main thread in _finish_analysis
+        # once the worker emits 'finished'.
+        self.ui.btn_run.setEnabled(False)
+        self.ui.label_status.setText('Processing data...')
+        self.ui.label_status.setStyleSheet('color: rgb(150,150,150);')
+
+        self._analysis_thread = QtCore.QThread()
+        self._analysis_worker = AnalysisWorker(self)
+        self._analysis_worker.moveToThread(self._analysis_thread)
+        self._analysis_thread.started.connect(self._analysis_worker.run)
+        self._analysis_worker.finished.connect(self._on_compute_finished)
+        self._analysis_worker.failed.connect(self._on_compute_failed)
+        self._analysis_worker.finished.connect(self._analysis_thread.quit)
+        self._analysis_worker.failed.connect(self._analysis_thread.quit)
+        # The thread/worker are kept as attributes (replaced on the next run)
+        # rather than deleteLater'd, so the re-entrancy guard can safely call
+        # isRunning() afterwards without touching a deleted C++ object.
+        self._analysis_thread.start()
+
+    def _on_compute_failed(self, msg):
+        stop_functime('calculations failed')
+        self.error(msg)
+        self.ui.btn_run.setEnabled(True)
+
+    def _on_compute_finished(self):
         print('')
         stop_functime('calculations complete')
-        
+        try:
+            self._finish_analysis()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            self.error('Error during plot generation (see console)')
+        finally:
+            self.ui.btn_run.setEnabled(True)
+
+    def _finish_analysis(self):
         try:
             gen_treemap(self)  # move back to end
         except Exception:
@@ -895,45 +1031,45 @@ class MainWindow(QMainWindow):
         if self.analysisrun:
             self.regenerateplts()
         else:
-            self.ftplt = show_featureplt(self, 'featureplt', self.ui.frame_featureplt, self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
+            self.ftplt = self.safe_generate('feature plot', show_featureplt, self, 'featureplt', self.ui.frame_featureplt, self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
             stop_functime('ftplt complete')
-        
-            self.dend = plot_dendrogram(self, 'dend', self.ui.frame_dend, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
+
+            self.dend = self.safe_generate('dendrogram', plot_dendrogram, self, 'dend', self.ui.frame_dend, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
             stop_functime('dendrogram complete')
-        
+
             if self.analysis_paramsgui.PCA:
-                self.pca = plot_PCA(self, 'pca', self.ui.frame_pca, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
+                self.pca = self.safe_generate('PCA/NMDS plot', plot_PCA, self, 'pca', self.ui.frame_pca, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
                 stop_functime('nmds complete')
-        
+
             if self.analysis_paramsgui.FC3Dplt:
-                self.fc3d = plot_fc3d(self, 'fc3d', self.ui.frame_fc3d,  self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets) 
+                self.fc3d = self.safe_generate('3D fold-change plot', plot_fc3d, self, 'fc3d', self.ui.frame_fc3d,  self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
                 stop_functime('fc3d complete')
-        
+
             if self.analysis_paramsgui.KMD:
-                self.kmd = kendrick(self, 'kmd', self.ui.frame_kmd, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+                self.kmd = self.safe_generate('Kendrick mass defect plot', kendrick, self, 'kmd', self.ui.frame_kmd, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
                 stop_functime('kmd complete')
-        
+
             if self.analysis_paramsgui.MZRTplt:
-                self.mzrt = plot_mzrt(self, 'mzrt', self.ui.frame_mzrt, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+                self.mzrt = self.safe_generate('m/z vs RT plot', plot_mzrt, self, 'mzrt', self.ui.frame_mzrt, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
                 stop_functime('mzrt complete')
-        
+
             if self.analysis_paramsgui.Volcanoplt:
-                self.volcano = plot_volcano(self, 'volcano', self.ui.frame_volcano, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+                self.volcano = self.safe_generate('volcano plot', plot_volcano, self, 'volcano', self.ui.frame_volcano, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
                 stop_functime('volcano complete')
-        
-            self.heatmap = plot_heatmap(self,  'heatmap', self.ui.frame_heatmap, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'))
+
+            self.heatmap = self.safe_generate('heatmap', plot_heatmap, self,  'heatmap', self.ui.frame_heatmap, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'))
             stop_functime('heatmap complete')
-        
+
             self.abundplt = plot_abund(self, 'abund')
-        
+
             if self.fragfilename != '':
                 self.spec = show_spectrum(self, 'spec')
-        
+
             if self.analysis_paramsgui.CVfil:
-                self.prevcv = prev_cv(self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none')
+                self.prevcv = self.safe_generate('CV plot', prev_cv, self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none')
                 stop_functime('cvplt complete')
-        
-            self.samplecorr = plot_samplecorr(self, 'samplecorr', self.ui.frame_samplecorr, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+
+            self.samplecorr = self.safe_generate('sample correlation plot', plot_samplecorr, self, 'samplecorr', self.ui.frame_samplecorr, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
             stop_functime('samplecorr complete')
         
         self.analysisrun = True
@@ -990,9 +1126,10 @@ class MainWindow(QMainWindow):
         print('')
         print('')
         reset_runtime()
-        
-        
+
+
         self.write_save()
+        self.export_filtered_outputs()
         
     def enumerate_inputs(self):
         self.analysis_paramsgui = analysis_parameters()
@@ -1125,39 +1262,39 @@ class MainWindow(QMainWindow):
         grpsts = self.groupsets
     
         if self.analysis_paramsgui.CVfil:
-            self.prevcv.reset(self, '', '')
+            self.safe_generate('CV plot', self.prevcv.reset, self, '', '')
             stop_functime('cvplt complete')
-    
-        self.ftplt.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
+
+        self.safe_generate('feature plot', self.ftplt.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
         stop_functime('ftplt complete')
-    
-        self.dend.reset(pltfile, '', '')
+
+        self.safe_generate('dendrogram', self.dend.reset, pltfile, '', '')
         stop_functime('dendrogram complete')
-    
+
         if self.analysis_paramsgui.PCA:
-            self.pca.reset(pltfile, '', '')
+            self.safe_generate('PCA/NMDS plot', self.pca.reset, pltfile, '', '')
             stop_functime('nmds complete')
-    
+
         if self.analysis_paramsgui.FC3Dplt:
-            self.fc3d.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            self.safe_generate('3D fold-change plot', self.fc3d.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
             stop_functime('fc3d complete')
-    
+
         if self.analysis_paramsgui.KMD:
-            self.kmd.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            self.safe_generate('Kendrick mass defect plot', self.kmd.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
             stop_functime('kmd complete')
-    
+
         if self.analysis_paramsgui.MZRTplt:
-            self.mzrt.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            self.safe_generate('m/z vs RT plot', self.mzrt.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
             stop_functime('mzrt complete')
-    
+
         if self.analysis_paramsgui.Volcanoplt:
-            self.volcano.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            self.safe_generate('volcano plot', self.volcano.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
             stop_functime('volcano complete')
-    
-        self.heatmap.reset(self,  'heatmap', self.ui.frame_heatmap, pltfile)
+
+        self.safe_generate('heatmap', self.heatmap.reset, self,  'heatmap', self.ui.frame_heatmap, pltfile)
         stop_functime('heatmap complete')
-    
-        self.samplecorr.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+
+        self.safe_generate('sample correlation plot', self.samplecorr.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
         stop_functime('samplecorr complete')
     
         self.ui.label_status.setText('Update Complete')
