@@ -343,16 +343,19 @@ class UIFunctions(MainWindow):
         """
         Rebuilds the groupset list widget from the model and restores selection.
         """
-        selitem = self.ui.listWidget_pltgrps.currentRow() - 1
-        selitem = max(selitem, 0)
-
         self.ui.listWidget_pltgrps.clear()
         for groupset in self.groupsetmodel:
             item = QListWidgetItem(groupset.name)
             item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
             self.ui.listWidget_pltgrps.addItem(item)
 
-        self.ui.listWidget_pltgrps.setCurrentRow(selitem)
+        # Trust the model's own selected_index (already correctly maintained
+        # by add()/remove()/from_legacy_list()) rather than re-deriving a
+        # guess from the widget's currentRow() before it's cleared above --
+        # that previously read the stale pre-rebuild row and shifted it by
+        # one, so live selection drifted toward row 0 on every remove/load
+        # and writegroups() would then write into the wrong model slot.
+        self.ui.listWidget_pltgrps.setCurrentRow(self.groupsetmodel.selected_index)
         UIFunctions.updategroups(self)
 
 
