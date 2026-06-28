@@ -410,6 +410,12 @@ def mergeions(analysis_params, ion_filters):
 
     # Format the merged data frame and save it
     msdata_merged = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), sep=',', header=None, index_col=None, low_memory=False)
+    # Columns 0-2 (row 2 currently blank/NaN here) get inferred as float64
+    # since every other row in them is numeric -- widen to object first so
+    # assigning the text header labels below doesn't try to losslessly cast
+    # a string into a float64 column. Newer pandas raises on that (it used
+    # to silently upcast with just a FutureWarning).
+    msdata_merged[msdata_merged.columns[0:3]] = msdata_merged[msdata_merged.columns[0:3]].astype(object)
     msdata_merged.iloc[2, 0:3] = ['Compound', 'm/z', 'Retention time (min)']
     msdata_merged.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), header=False, index=False)
 
