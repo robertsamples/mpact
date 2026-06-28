@@ -343,19 +343,29 @@ class UIFunctions(MainWindow):
         """
         Rebuilds the groupset list widget from the model and restores selection.
         """
-        self.ui.listWidget_pltgrps.clear()
+        list_widget = self.ui.listWidget_pltgrps
+
+        # Block signals while rebuilding: clear()/addItem()/setCurrentRow()
+        # below all fire currentItemChanged, which is wired to writegroups()
+        # (ui_functions.py:148) -- a GUI-to-model sync that would otherwise
+        # run mid-rebuild, before the drag-list boxes are refreshed for the
+        # new selection, and clobber the model with stale leftover box
+        # contents from whatever groupset was selected a moment earlier.
+        list_widget.blockSignals(True)
+        list_widget.clear()
         for groupset in self.groupsetmodel:
             item = QListWidgetItem(groupset.name)
             item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
-            self.ui.listWidget_pltgrps.addItem(item)
+            list_widget.addItem(item)
 
         # Trust the model's own selected_index (already correctly maintained
         # by add()/remove()/from_legacy_list()) rather than re-deriving a
         # guess from the widget's currentRow() before it's cleared above --
         # that previously read the stale pre-rebuild row and shifted it by
-        # one, so live selection drifted toward row 0 on every remove/load
-        # and writegroups() would then write into the wrong model slot.
-        self.ui.listWidget_pltgrps.setCurrentRow(self.groupsetmodel.selected_index)
+        # one, so live selection drifted toward row 0 on every remove/load.
+        list_widget.setCurrentRow(self.groupsetmodel.selected_index)
+        list_widget.blockSignals(False)
+
         UIFunctions.updategroups(self)
 
 
@@ -417,11 +427,22 @@ class UIFunctions(MainWindow):
         item = QListWidgetItem(name)
         item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
 
-        self.ui.listWidget_pltgrps.addItem(item)
-        item.setSelected(True)
+        list_widget = self.ui.listWidget_pltgrps
 
+        # Block signals for the same reason as updatesets(): setCurrentItem()
+        # below fires currentItemChanged -> writegroups(), which would write
+        # whatever's currently in the (stale, belonging to the previously
+        # selected groupset) drag-list boxes into this brand-new groupset's
+        # slot instead of leaving its real (exclude-everything) default data
+        # in place. Update the model first, then sync the GUI from it
+        # ourselves via updategroups(), rather than relying on the signal.
+        list_widget.blockSignals(True)
+        list_widget.addItem(item)
         self.groupsetmodel.add(item.text(), all_groups=self.groups)
-        self.ui.listWidget_pltgrps.setCurrentItem(item)
+        list_widget.setCurrentItem(item)
+        list_widget.blockSignals(False)
+
+        UIFunctions.updategroups(self)
 
 
     def removegroup(self):
