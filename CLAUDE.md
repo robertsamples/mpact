@@ -78,9 +78,25 @@ Headless unit tests in `code/tests/` (pure-logic only — no GUI). Run:
 python -m pytest code/tests -q
 ```
 
-Covers `filter`, `stats`, `importdependencies`, `translators`. Add tests here
-for any new Qt-free logic. GUI behaviour must be verified by running the app
-(can't be tested headlessly).
+Covers `filter`, `stats`, `importdependencies`, `translators`, `groupsets`. Add
+tests here for any new Qt-free logic. GUI behaviour must be verified by running
+the app (can't be tested headlessly).
+
+## Groupsets (`groupsets.py`)
+
+The user-defined "groupsets" (colour/presence-absence rules for plotting
+features) are an MVC model: `GroupSet` (data) + `GroupSetModel` (collection,
+bounds-safe selection, CRUD) + `build_query_dict()` (the {descriptive_name:
+GroupSet} mapping MSFaST/plotting consume). `MainWindow.groupsetmodel` replaces
+the old bare `self.querys` list + `self.selset` index. `ui_functions.py`'s
+`addgroup`/`removegroup`/`updatesets`/`updategroups`/`writegroups`/
+`colour_picker1` are thin view-sync controllers over the model — same method
+names, so call sites elsewhere didn't change. `main.py`'s `query` class is kept
+ONLY as the unpickle target for old `.mpct` files (pickled by qualified name
+`main.query`); `GroupSet.from_legacy`/`GroupSetModel.from_legacy_list` convert
+on load. UI uses `QListWidget` (generated, off-limits), so this is not a true
+`QAbstractListModel`/`QListView` setup — the "view" side is the existing
+hand-written widget-sync code in `ui_functions.py`, kept thin.
 
 ## Conventions
 
@@ -92,15 +108,24 @@ for any new Qt-free logic. GUI behaviour must be verified by running the app
 - `loadsession` restores each parameter independently (a bad/missing field
   can't abort the rest); add new analysis params to BOTH `enumerate_inputs`
   (save) and `loadsession` (restore).
+- Plot objects (`self.ftplt`, `self.kmd`, `self.spec`, ...) are created the
+  first time they're needed and `.reset()` afterwards, via
+  `MainWindow._create_or_reset()` / `_generate_plots()` — never gate
+  create-vs-reset on `self.analysisrun`, since an optional output (frag file,
+  KMD, PCA...) can newly turn on in the same session after being off for a
+  prior dataset, and the object would never have been created.
+- Use `MainWindow._refresh_highlight()` (not `highlight_feature()`) to redraw
+  the currently-selected feature's displays without changing selection state
+  (e.g. on a feature-info dialog tab switch). `highlight_feature(newfeature)`
+  is for real selection events and toggles the highlight off if the same
+  feature is clicked twice — calling it with the already-selected feature
+  re-triggers that toggle, which is a bug, not a refresh.
 
 ## Refactor status (Jun 2026)
 
-Done & validated: (1) save/load param round-trip fix, (2) QThread worker so the
-UI doesn't freeze, (3) `fastcluster` optional accel + `low_memory` warning
-cleanup, (4) translator framework + GNPS2 reindex + auto-export + 37 passing
-tests. **Remaining: MVC refactor for the groupsets** (`query`/`self.querys`/
-`self.selset` model + the `UIFunctions` sync methods + `enumerate_inputs` +
-`.mpct` format). Must stay backward-compatible with existing `.mpct` files
-(they pickle `query` objects). UI uses `QListWidget` (generated), so a true
-`QAbstractListModel`/`QListView` isn't possible without UI changes — target a
-`GroupSetModel` class with thin view-sync controllers.
+All 5 stages done & validated: (1) save/load param round-trip fix, (2) QThread
+worker so the UI doesn't freeze, (3) `fastcluster` optional accel +
+`low_memory` warning cleanup, (4) translator framework + GNPS2 reindex +
+auto-export, (5) MVC refactor for groupsets. Plus two user-reported bugfixes:
+highlight toggling on feature-info tab switches, and plot objects never
+(re)created when an optional output turns on mid-session. 57 passing tests.
