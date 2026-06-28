@@ -164,6 +164,20 @@ Lower-priority siblings of the groupset/plot-slot refactors above:
   and branching fields (blank-filter abs/rel, max-iso-shift combo-by-text) —
   abstracting those into a generic table would obscure logic that's
   clearer inline, for marginal duplication savings.
+- ~~Redundant disk I/O on every click~~ — **done.** See `csvcache.py`.
+- ~~`graphfilters` stringly-typed flag~~ — **done.** See
+  `groupsets.normalize_graphfilters()`.
+- **`exportgnps()` (`main.py:309-522`, ~210 lines) duplicates, less
+  robustly, logic `translators.py` already has tested.** It hand-rolls
+  GNPS/MGF compound matching via an O(n·m) pairwise RT/m·z tolerance loop
+  with no compound-ID fast path — exactly what
+  `translators.reindex_fragments`/`filter_source_peaktable` already do, by
+  matching on compound ID first and falling back to tolerance, with test
+  coverage. Not dead code: it's a separately-triggered button
+  (`btn_exportgnps`) for a user-supplied GNPS-format file, distinct from
+  the automatic `export_filtered_outputs()` export. Worth migrating to
+  reuse the tested matching logic instead of maintaining two
+  implementations — logged here, not yet started.
 
 ## Refactor status (Jun 2026)
 
