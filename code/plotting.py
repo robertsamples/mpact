@@ -559,7 +559,15 @@ class plot_samplecorr(ui_plot):
             msdata = msdata.stack([0, 1, 2]).groupby(level=[0, 1, 2, 3, 4]).mean().droplevel(level=3, axis=0).unstack()
         msdata.index = msdata.index.droplevel([1, 2])
         pmatrix = msdata.corr(method='spearman')
-        ax = self.parent.ax[self.currplt].figure.axes[0] if len(self.parent.ax[self.currplt].figure.axes) > 1 else self.parent.ax[self.currplt]
+        fig = self.parent.fig[self.currplt]
+        ax = self.parent.ax[self.currplt]
+        # Remove any axes left over from a previous run (notably the colorbar
+        # that sns.heatmap appends). Without this a new colour-legend bar is
+        # stacked onto the figure every time the plot is regenerated.
+        for extra_ax in list(fig.axes):
+            if extra_ax is not ax:
+                extra_ax.remove()
+        ax.clear()
         sns.heatmap(pmatrix, ax=ax, cmap=self.parent.analysis_paramsgui.colorscheme, vmin=0, vmax=1)
         ax.tick_params(axis='both', which='both', labelsize=10)
         ax.set_xticks(range(len(pmatrix.columns)))
@@ -1130,100 +1138,6 @@ def gen_upsetplt(parent):    #need to do something to handle groups with names t
     pixmap = QPixmap('test_upsetplt.png')
     parent.ui.label_upset.setPixmap(pixmap)                                                                     
 
-def gen_treemap(parent):
-    #generate treemap for visualization of filtering levels
-    #needed to refilter data and see how df row lengths change to avoid issues with one feature being in multiple filter lists
-    plt.clf()
-    msdata_filtered = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-    fltrcnt, color = {}, []
-    iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-    total = len(iondict.index)
-    current = total
-    
-    if parent.analysis_paramsgui.relfil:
-        filteredsetsize = len(iondict[iondict['pass_relfil']].index)
-        fltrcnt['Mispicked'] = current - filteredsetsize
-        current = filteredsetsize
-        color.append('#0000ff')
-    
-    if parent.analysis_paramsgui.blnkfltr:
-        filteredsetsize = len(iondict[iondict['pass_blnkfil']].index)
-        fltrcnt['Blank'] = current - filteredsetsize
-        current = filteredsetsize
-        color.append('#00aaaa')
-    
-    if parent.analysis_paramsgui.CVfil:
-        fltrcnt['Nonreproducible'] = len(parent.ionfilters['cv'].ions)
-        current = current - fltrcnt['Nonreproducible']
-        color.append('#ff0000')
-    
-    if parent.analysis_paramsgui.decon:
-        fltrcnt['Insource'] = len(parent.ionfilters['insource'].ions)
-        color.append('#00aa00')
-    
-    fltrcnt['High Quality'] = len(msdata_filtered.index)
-    color.append('#000000')
-
-    sizes = list(fltrcnt.values())
-    total_size = sum(fltrcnt.values())
-    labels = [f"{label}\n{size}\n{round(100*size/total_size,1)}%" for label, size in fltrcnt.items()]
-
-    squarify.plot(sizes=sizes, label=labels, color=color, alpha=0.3, text_kwargs={'fontsize': 10})
-    plt.axis('off')
-    plt.savefig('treemap.png', dpi=150, bbox_inches='tight')
-    pixmap = QPixmap('treemap.png')
-    parent.ui.label_treemap.setPixmap(pixmap)
-
-
-
-    iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
-
-    # Apply filters if required
-    if parent.analysis_paramsgui.relfil:
-        iondict = iondict[iondict['pass_relfil']]
-    if parent.analysis_paramsgui.decon:
-        iondict = iondict[iondict['pass_insource']]
-    if parent.analysis_paramsgui.blnkfltr:
-        iondict = iondict[iondict['pass_blnkfil']]
-    if parent.analysis_paramsgui.CVfil:
-        iondict = iondict[iondict['pass_cvfil']]
-
-    # Prepare data for upset plot
-    iongroups = iondict['groups'].tolist()
-    freq = {}
-    biolgroups = []
-    for item in iongroups:
-        if item not in freq:
-            freq[item] = 0
-        freq[item] += 1
-
-    header = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[0, :]
-    for elem in header:
-        if elem not in biolgroups:
-            biolgroups.append(elem)
-
-    sets = [' ' + elem for elem in list(freq.keys())]
-    size = list(freq.values())
-    setdf = pd.DataFrame({'groups': sets})
-    for elem in biolgroups:  #have to do this if one group is a substring of another, add space
-        setdf[elem] = setdf['groups'].str.contains(' ' + elem)
-    setdf['size'] = size
-    setdf = setdf.iloc[:, 1:]
-    setdf = setdf.set_index(biolgroups)['size']
-
-    # Plot and display the upset plot
-    with plt.rc_context({"font.size": 8}):
-        upsetplt = upsetplot.plot(setdf, show_counts='%d', show_percentages=True, sort_categories_by=None)
-
-    figup = upsetplt['matrix'].figure
-    figup.set_size_inches(5, 4)
-    figup.set_facecolor((0, 0, 0, 0))
-    upsetplt['intersections'].set_facecolor((1, 1, 1, .25))
-    figup.savefig('test_upsetplt.png', dpi=150, bbox_inches='tight')
-    pixmap = QPixmap('test_upsetplt.png')
-    parent.ui.label_upset.setPixmap(pixmap)
-    
-    
 def gen_treemap(parent):
     #generate treemap for visualization of filtering levels
     #needed to refilter data and see how df row lengths change to avoid issues with one feature being in multiple filter lists

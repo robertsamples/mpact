@@ -10,29 +10,49 @@ from pathlib import Path
 
 
 def format_check(parent):
-    """
-    Check if the file has the right format, and if not, reformat it.
-    """
-    try:
-        if parent.filename.suffix == '.txt':
-            reformat_msdial(Path(parent.filename))
-            parent.filename = Path(str(parent.filename)[:-4] + '.csv')
+    """Detect the peak table's source format and convert it to MPACT's internal
+    layout.
 
-            
-        if parent.filename.suffix == '.csv':
-            msdata = pd.read_csv(parent.filename, sep = ',', header = None, index_col = None) #imports feature list
-            if msdata.iloc[0, 0] == 'row ID':
-                reformat_mzmine(Path(parent.filename))
-            if msdata.iloc[0, 0] == 'Bucket label':
-                reformat_metaboscape(Path(parent.filename))
-                
-            msdata = pd.read_csv(Path(parent.filename), sep = ',', header = [0,1,2], index_col = [0]) #imports data
-            if len(msdata[~msdata.index.duplicated()].index) > 0:
-                rename_duplicates(Path(parent.filename))
-            
+    Uses the content-based detection in ``translators`` (so it is robust to
+    column shuffling between tool versions) and reports failures instead of
+    silently swallowing them, so a bad import is visible to the user rather than
+    producing a mysteriously broken analysis downstream.
+    """
+    import translators
+
+    try:
+        path = Path(parent.filename)
+        fmt = translators.detect_peaktable_format(path)
+        print('Peak table format detected: ' + fmt)
+
+        if fmt == translators.MSDIAL:
+            reformat_msdial(path)
+            # MS-DIAL conversion writes a sibling .csv; make it the active file.
+            parent.filename = path.parent / (path.stem + '.csv')
+            path = Path(parent.filename)
+        elif fmt == translators.MZMINE:
+            reformat_mzmine(path)
+        elif fmt == translators.METABOSCAPE:
+            reformat_metaboscape(path)
+        # PROGENESIS is already the internal layout; nothing to convert.
+
+        if path.suffix == '.csv':
+            # Normalise/deduplicate compound ids (preserves prior behaviour:
+            # rename_duplicates is a no-op when there are no duplicates).
+            rename_duplicates(path)
+
+        if fmt == translators.UNKNOWN:
+            try:
+                parent.error('Unrecognised peak-table format; import may fail')
+            except Exception:
+                pass
     except Exception:
-        pass
-        return()
+        import traceback
+        traceback.print_exc()
+        try:
+            parent.error('Could not read/convert peak table (see console)')
+        except Exception:
+            pass
 
 
 def reformat_metaboscape(file):
