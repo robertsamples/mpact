@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import pickle
 
+from csvcache import cached_read_csv
+
 import matplotlib
 #matplotlib.style.use('ggplot')
 import matplotlib.pyplot as plt
@@ -211,13 +213,13 @@ class plot_abund():
     def plot(self, parent):
         # Get header info
         currplt = self.currplt
-        msdata = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0]).iloc[:, 2:].loc[parent.pickedfeature]
+        msdata = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0]).iloc[:, 2:].loc[parent.pickedfeature]
         msdata = msdata.reset_index()
         msdata.columns = ['biolgroup','sample','injection','abundance']
         msdata = msdata.drop(columns=['injection'])
-    
+
         # Get stats for the given ion
-        summary = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_summarydata.csv'), sep=',', header=[0, 1], index_col=[0]).iloc[:, 2:].loc[parent.pickedfeature]
+        summary = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_summarydata.csv'), sep=',', header=[0, 1], index_col=[0]).iloc[:, 2:].loc[parent.pickedfeature]
         combasd = summary.loc[['combASD']].to_frame()
         combasd.index = combasd.index.droplevel(level=0)
         neff = summary.loc[['neff']].to_frame()
@@ -400,7 +402,7 @@ class plot_heatmap():
         file (str): The file that contains the data for the heatmap.
     """
     def __init__(self, parent, currplt, frame, file):
-        msdata = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep = ',', header = [2], index_col = [0]).iloc[:,2:]
+        msdata = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep = ',', header = [2], index_col = [0]).iloc[:,2:]
         cm = sns.clustermap(msdata, standard_scale=0, metric="euclidean", method="ward", cmap = parent.analysis_paramsgui.colorscheme) #viridis
         parent.cmind = cm.dendrogram_row.reordered_ind #saves reordered index so that we can increment selection up and down.
         parent.fig[currplt] = cm.fig
@@ -427,7 +429,7 @@ class plot_heatmap():
                 # and highlights the feature by name on other plots
             if _is_duplicate_pick(parent, event):
                 return
-            iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep = ',', header = [0], index_col = [0])
+            iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep = ',', header = [0], index_col = [0])
             coord = [event.mouseevent.xdata,event.mouseevent.ydata]
             parent.heatind = int(np.floor(coord[1]))
             name = msdata.index.tolist()[parent.cmind[parent.heatind]]    
@@ -465,7 +467,7 @@ class plot_heatmap():
         
     def reset(self, parent, currplt, frame, file):
         #makes new figure with updated heatmap and saves
-        msdata = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep = ',', header = [2], index_col = [0]).iloc[:,2:]
+        msdata = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep = ',', header = [2], index_col = [0]).iloc[:,2:]
         cm2 = sns.clustermap(msdata, standard_scale=0, metric="euclidean", method="ward", cmap = parent.analysis_paramsgui.colorscheme) #viridis
         parent.cmind = cm2.dendrogram_row.reordered_ind
         updatedfig = cm2.fig
@@ -545,7 +547,7 @@ class plot_mzrt(ui_plot):
         self.plot(parent, file, filtereddfs, groupsets)
         
     def plot(self, parent, file, filtereddfs, groupsets): # abundance tied opacity used here currently
-        iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+        iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         
         for elem in filtereddfs:
             if parent.analysis_paramsgui.blnkfltr:
@@ -600,8 +602,8 @@ class plot_samplecorr(ui_plot):
         self.plot(parent, file, filtereddfs, groupsets)
         
     def plot(self, parent, file, filtereddfs, groupsets):
-        iondict = pd.read_csv(self.parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
-        msdata = pd.read_csv(self.parent.analysis_paramsgui.outputdir / (self.parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+        iondict = cached_read_csv(self.parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+        msdata = cached_read_csv(self.parent.analysis_paramsgui.outputdir / (self.parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
         try:
             msdata = msdata.stack([0, 1, 2], future_stack=True).groupby(level=[0, 1, 2, 3, 4]).mean().droplevel(level=3, axis=0).unstack()
         except TypeError:
@@ -881,7 +883,7 @@ class plot_PCA(ui_plot):
             msdata_header = pd.read_csv('averagepca.csv', sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
             pcadf = pd.read_csv('averagepca.csv', sep=',', header=[2], index_col=[0]).drop(['m/z', 'Retention time (min)'], axis=1).transpose().astype(float).reset_index().rename(columns={'index': 'File'})
         else:
-            msdata_header = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose() 
+            msdata_header = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
             pcadf = pd.read_csv(file, sep=',', header=[2], index_col=[0]).drop(['m/z', 'Retention time (min)'], axis=1).transpose().astype(float).reset_index().rename(columns={'index': 'File'})
 
         components = len(msdata_header.index)
@@ -1057,7 +1059,7 @@ class prev_cv(ui_plot):
 
     def plot(self, parent, file, filtereddfs, groupsets):
         # Load and filter ion data
-        iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', header=0, index_col=0)
+        iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', header=0, index_col=0)
         iondict = iondict[~np.isnan(iondict['average CV'])]
 
         # Calculate mean and median CV, and scale data
@@ -1069,7 +1071,7 @@ class prev_cv(ui_plot):
         iondictmed.iloc[:,0] = 100 * iondictmed.iloc[:,0]/len(iondictmed['median CV'])
 
         # Calculate maximum theoretical CV based on neff
-        msdata_header = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0,1,2]).iloc[:3,:].transpose()
+        msdata_header = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0,1,2]).iloc[:3,:].transpose()
         msdata_header.columns = ['Biolgroup', 'Sample', 'Injection']
         average_n = msdata_header['Injection'].nunique() / msdata_header['Sample'].nunique()
         modelstdevlist = [1] + [0] * (int(average_n) - 1)
@@ -1144,7 +1146,7 @@ def gen_upsetplt(parent):    #need to do something to handle groups with names t
     Returns:
     None
     """
-    iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
+    iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
                             
     # Apply filters if required
     if parent.analysis_paramsgui.relfil:
@@ -1165,7 +1167,7 @@ def gen_upsetplt(parent):    #need to do something to handle groups with names t
             freq[item] = 0
         freq[item] += 1
     
-    header = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[0, :]
+    header = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[0, :]
     for elem in header:
         if elem not in biolgroups:
             biolgroups.append(elem)
@@ -1206,9 +1208,9 @@ def gen_treemap(parent):
 
     """
     plt.clf()
-    msdata_filtered = pd.read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+    msdata_filtered = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
     fltrcnt, color = {}, []
-    iondict = pd.read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+    iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
     total = len(iondict.index)
     current = total
     
