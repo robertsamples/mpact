@@ -8,7 +8,7 @@ consumed by ``MSFaST``/``plotting``.
 
 import pytest
 
-from groupsets import GroupSet, GroupSetModel, build_query_dict
+from groupsets import GroupSet, GroupSetModel, build_query_dict, normalize_graphfilters
 
 
 class LegacyQuery:
@@ -218,3 +218,40 @@ def test_build_query_dict_multiple_groupsets_distinct_keys():
     model.update(1, src=['B'], colour='#ffffff')
     qd = build_query_dict(model)
     assert len(qd) == 2
+
+
+def test_build_query_dict_accepts_list_graphfilters():
+    """Current code (main.py's enumerate_inputs) builds graphfilters as a
+    list (['cv', 'rel']), not the older space-joined string -- both shapes
+    must merge into excl identically."""
+    model = GroupSetModel()
+    model.add('Set1')
+    model.update(0, excl=['Blanks'])
+    qd = build_query_dict(model, graphfilters=['cv', 'rel'])
+    gs = next(iter(qd.values()))
+    assert gs.excl == ['Blanks', 'cv', 'rel']
+
+
+# --------------------------------------------------------------------------- #
+# normalize_graphfilters
+# --------------------------------------------------------------------------- #
+
+def test_normalize_graphfilters_splits_legacy_string():
+    """Older .mpct saves pickled graphfilters as a space-joined string."""
+    assert normalize_graphfilters('cv rel') == ['cv', 'rel']
+
+
+def test_normalize_graphfilters_handles_trailing_space():
+    # main.py's old string-building always left a trailing space unless
+    # 'insource' (added last, with no trailing space) was checked --
+    # str.split() (no args) must not produce a spurious empty token.
+    assert normalize_graphfilters('cv ') == ['cv']
+    assert normalize_graphfilters('cv rel ') == ['cv', 'rel']
+
+
+def test_normalize_graphfilters_passes_through_list():
+    assert normalize_graphfilters(['cv', 'rel']) == ['cv', 'rel']
+
+
+def test_normalize_graphfilters_empty_string():
+    assert normalize_graphfilters('') == []

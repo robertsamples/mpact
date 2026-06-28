@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import filter
 import stats
+from groupsets import normalize_graphfilters
 from datetime import datetime
 import time
 from pathlib import Path
@@ -266,7 +267,7 @@ def run_MSFaST(self):
                             '---Graphing Parameters---\n',
                             'Filters: \n'])
     
-    for elem in analysis_params.graphfilters.split(' '):
+    for elem in normalize_graphfilters(analysis_params.graphfilters):
         analysisrec.write(elem + '\n')
     
     analysisrec.writelines(['\n',

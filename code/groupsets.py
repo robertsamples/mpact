@@ -154,6 +154,19 @@ class GroupSetModel:
         return model
 
 
+def normalize_graphfilters(graphfilters):
+    """Coerce ``graphfilters`` to a list of filter-name tokens.
+
+    Current code populates ``analysis_parameters.graphfilters`` as a list
+    (``['cv', 'rel', 'insource']``); older ``.mpct`` saves pickled it as a
+    space-joined string instead, so a loaded session can hand back either
+    shape here.
+    """
+    if isinstance(graphfilters, str):
+        return graphfilters.split()
+    return list(graphfilters)
+
+
 def build_query_dict(model, graphfilters=''):
     """Build the ``{descriptive_name: GroupSet}`` mapping MSFaST/plotting consume.
 
@@ -165,7 +178,7 @@ def build_query_dict(model, graphfilters=''):
     ``analysisinfo.txt`` as a human-readable summary of the groupset's rule)
     has the form ``"<src> +<incl> -<excl> c=<colour> n=<name>"``.
     """
-    extra_excl = graphfilters.split()
+    extra_excl = normalize_graphfilters(graphfilters)
     result = {}
     for groupset in model:
         merged_excl = groupset.excl + extra_excl
