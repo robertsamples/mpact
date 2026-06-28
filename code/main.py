@@ -33,6 +33,7 @@ from ui_functions import *
 import files
 
 from MSFaST import run_MSFaST, analysis_parameters
+from groupsets import GroupSet, GroupSetModel, build_query_dict
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
@@ -113,8 +114,13 @@ class NumericalTreeWidgetItem(QtWidgets.QTreeWidgetItem):
             return super().__lt__(other)
 
 class query:
-    """
-    Defines conditions (group presence/absence) to plot feature in a colour
+    """Legacy groupset shape, kept only so old ``.mpct`` files (which pickle
+    this class by qualified name ``main.query``) can still be unpickled.
+
+    Live code uses ``groupsets.GroupSet``/``GroupSetModel`` instead; on load,
+    any ``query`` objects found in a save file are converted via
+    ``GroupSet.from_legacy`` (see ``MainWindow.read_save``). Do not use this
+    class for new code.
     """
     def __init__(self):
         self.name = ''
@@ -247,8 +253,7 @@ class MainWindow(QMainWindow):
         self.pickedfeature = ''
         self.highlightcol = 'yellow'
         self.dbsearchdone = False
-        self.selset = -1 #selected groupset index, refactor with MVC design
-        self.querys = [] #dictionary of the query/groupset objects
+        self.groupsetmodel = GroupSetModel()  # the groupset MVC model
         self.groups = [] #biological groups in the dataset
         self.filename = Path.cwd()
         self.extractmetadatafilename = Path.cwd()
@@ -704,11 +709,20 @@ class MainWindow(QMainWindow):
                     
     def highlight_feature(self, newfeature):
         """
-        Highlights the selected feature in all plots.
-    
+        Select (or, if the same feature is clicked twice, deselect) a feature
+        and highlight it across all plots.
+
+        This is the entry point for actual selection events (clicking a plot
+        point, a tree row, or arrow-key heatmap navigation) -- it is where the
+        "click the same feature twice to clear it" toggle belongs. To simply
+        refresh the displays for the *currently* selected feature (e.g. when
+        switching tabs in the feature-info dialog) call ``_refresh_highlight``
+        instead; calling this method with ``newfeature == self.pickedfeature``
+        would incorrectly toggle the highlight off.
+
         Args:
             newfeature (str): The name of the new feature to highlight.
-        
+
         Returns:
             None.
         """
@@ -717,18 +731,30 @@ class MainWindow(QMainWindow):
             self.highlightcol = (0, 0, 0, 0)
         else:
             self.highlightcol = 'yellow'
-            
-        # Highlight the selected feature in all plots
+
+        self.pickedfeature = newfeature
+        self._refresh_highlight()
+
+    def _refresh_highlight(self):
+        """Redraw every plot/dialog for the current ``self.pickedfeature`` and
+        ``self.highlightcol`` without changing selection state.
+
+        Safe to call repeatedly (e.g. on every feature-info tab switch) since,
+        unlike ``highlight_feature``, it never toggles ``highlightcol``. Also
+        guards against the feature-info plot objects (``abundplt``/``spec``)
+        not existing yet, and against the current feature not being present in
+        the loaded fragmentation database.
+        """
         for plot in self.highlight:
             self.highlight[plot].set_color(self.highlightcol)
-            
-        # Set the selected feature as the picked feature
-        self.pickedfeature = newfeature
-        
+
+        if not self.pickedfeature:
+            return
+
         # Read iondict file to get ion data
         iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv',
                               sep=',', header=[0], index_col=[0])
-        
+
         # Update volcano plot with the selected feature
         if self.analysis_paramsgui.Volcanoplt:
             self.highlight['volcano'].set_data(
@@ -736,14 +762,14 @@ class MainWindow(QMainWindow):
                 [iondict.loc[self.pickedfeature, '-logq']]
             )
             self.canvas['volcano'].draw_idle()
-                
+
             # Update MZRT plot with the selected feature
             self.highlight['mzrt'].set_data(
                 [iondict.loc[self.pickedfeature, 'Retention time (min)']],
                 [iondict.loc[self.pickedfeature, 'm/z']]
             )
             self.canvas['mzrt'].draw_idle()
-        
+
         # Update KMD plot with the selected feature
         if self.analysis_paramsgui.KMD:
             self.highlight['kmd'].set_data(
@@ -751,19 +777,19 @@ class MainWindow(QMainWindow):
                 [iondict.loc[self.pickedfeature, 'kmd']]
             )
             self.canvas['kmd'].draw_idle()
-        
+
         # Update feature plot with the selected feature
         self.highlight['featureplt'].set_data(
             [iondict.loc[self.pickedfeature, 'Retention time (min)']],
             [iondict.loc[self.pickedfeature, 'm/z']]
         )
         self.canvas['featureplt'].draw_idle()
-        
+
         msdata = pd.read_csv(
             self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'),
             sep=',', header=[2], index_col=[0]
         )
-        
+
         # Set heatmap highlight based on view
         self.heatind = self.cmind.index(msdata.index.to_list().index(self.pickedfeature))
         xlim = int(self.canvas['heatmap'].figure.axes[2].get_xlim()[1])
@@ -772,16 +798,23 @@ class MainWindow(QMainWindow):
             [self.heatind, self.heatind, self.heatind+1, self.heatind+1, self.heatind]
         )
         self.canvas['heatmap'].draw_idle()
-        
+
         # Run search when feature is selected
         if self.ftrdialog.ui.stackedWidget.currentIndex() == 0 and not self.ftrdialog.isHidden():
             self.runsearch(iondict.loc[self.pickedfeature, 'm/z'])
-        
-        # Reset spec if fragfilename exists and update abundplt
-        if self.fragfilename != '':
-            self.spec.reset(self.fragdb.ions[self.pickedfeature].pattern)
-        if self.ftrdialog.ui.stackedWidget.currentIndex() == 2 and not self.ftrdialog.isHidden():
-            self.abundplt.reset()
+
+        # Reset spec if a fragmentation database with this feature is loaded.
+        # spec may not exist yet (e.g. a prior dataset had no frag file) and
+        # the feature may not be present in a newly-loaded fragdb, so both are
+        # guarded rather than assumed.
+        fragdb = getattr(self, 'fragdb', 'None')
+        if self.fragfilename != '' and getattr(self, 'spec', None) is not None \
+                and fragdb != 'None' and self.pickedfeature in getattr(fragdb, 'ions', {}):
+            self.safe_generate('spectrum plot', self.spec.reset, fragdb.ions[self.pickedfeature].pattern)
+
+        if self.ftrdialog.ui.stackedWidget.currentIndex() == 2 and not self.ftrdialog.isHidden() \
+                and getattr(self, 'abundplt', None) is not None:
+            self.safe_generate('abundance plot', self.abundplt.reset)
 
 
      # Move heatmap selection up or down with W/S key press
@@ -856,9 +889,10 @@ class MainWindow(QMainWindow):
         
         self.filename = self.analysis_paramsgui.outputdir / self.analysis_paramsgui.filename.stem / 'rawdata' / self.analysis_paramsgui.filename.name
     
-        # Get groups and update querys
+        # Get groups and load groupsets (accepts both old pickled `query`
+        # objects and current `GroupSet` objects -- see GroupSet.from_legacy).
         self.getgroups()
-        self.querys = self.analysis_paramsgui.queries
+        self.groupsetmodel = GroupSetModel.from_legacy_list(self.analysis_paramsgui.queries)
         UIFunctions.updatesets(self)
         
         
@@ -872,7 +906,7 @@ class MainWindow(QMainWindow):
         ``.mpct``.
         """
         params = self.analysis_paramsgui
-        params.queries = self.querys  # persist groupsets (revisit when MVC lands)
+        params.queries = self.groupsetmodel.to_legacy_list()  # plain GroupSet list
 
         def _capture(label, reader, default=None):
             try:
@@ -970,6 +1004,104 @@ class MainWindow(QMainWindow):
             self.ui.label_status.setText('Warning: ' + label + ' failed (see console)')
             return None
 
+    def _create_or_reset(self, attr, label, create_call, reset_call=None):
+        """Create a plot object the first time it's needed, or reset() it if
+        it already exists.
+
+        Plot (re)generation used to be gated entirely on ``self.analysisrun``
+        (a whole-session "has any analysis completed" flag): the very first
+        analysis created every enabled plot, and every later run/regenerate
+        only ever called ``.reset()`` on them. That breaks as soon as an
+        optional output toggles between runs in the same session -- e.g. the
+        first dataset has no fragmentation file (so ``self.spec`` is never
+        created) and a later dataset does: ``self.spec.reset(...)`` would then
+        raise ``AttributeError`` because the object was never created. Keying
+        the create-vs-reset decision off whether the attribute already exists
+        (rather than off analysisrun) fixes this for every optional plot.
+        """
+        if getattr(self, attr, None) is None:
+            result = self.safe_generate(label, create_call)
+            if result is not None:
+                setattr(self, attr, result)
+        elif reset_call is not None:
+            self.safe_generate(label, reset_call)
+
+    def _generate_plots(self):
+        """Create or refresh every plot for the current analysis parameters.
+
+        Shared by the post-compute step (``_finish_analysis``, after a fresh
+        ``run_MSFaST``) and the dialog's "Apply" button (``regenerateplts``),
+        so both paths get the same create-if-missing safety net.
+        """
+        params = self.analysis_paramsgui
+        pltfile = params.outputdir / (params.filename.stem + '_filtered.csv')
+        iondictfile = params.outputdir / 'iondict.csv'
+        dfs = self.filtereddfs
+        grpsts = self.groupsets
+
+        if params.CVfil:
+            self._create_or_reset('prevcv', 'CV plot',
+                lambda: prev_cv(self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none'),
+                lambda: self.prevcv.reset(self, '', ''))
+            stop_functime('cvplt complete')
+
+        self._create_or_reset('ftplt', 'feature plot',
+            lambda: show_featureplt(self, 'featureplt', self.ui.frame_featureplt, iondictfile, '', ''),
+            lambda: self.ftplt.reset(iondictfile, '', ''))
+        stop_functime('ftplt complete')
+
+        self._create_or_reset('dend', 'dendrogram',
+            lambda: plot_dendrogram(self, 'dend', self.ui.frame_dend, pltfile, '', ''),
+            lambda: self.dend.reset(pltfile, '', ''))
+        stop_functime('dendrogram complete')
+
+        if params.PCA:
+            self._create_or_reset('pca', 'PCA/NMDS plot',
+                lambda: plot_PCA(self, 'pca', self.ui.frame_pca, pltfile, '', ''),
+                lambda: self.pca.reset(pltfile, '', ''))
+            stop_functime('nmds complete')
+
+        if params.FC3Dplt:
+            self._create_or_reset('fc3d', '3D fold-change plot',
+                lambda: plot_fc3d(self, 'fc3d', self.ui.frame_fc3d, iondictfile, dfs, grpsts),
+                lambda: self.fc3d.reset(iondictfile, dfs, grpsts))
+            stop_functime('fc3d complete')
+
+        if params.KMD:
+            self._create_or_reset('kmd', 'Kendrick mass defect plot',
+                lambda: kendrick(self, 'kmd', self.ui.frame_kmd, iondictfile, dfs, grpsts),
+                lambda: self.kmd.reset(iondictfile, dfs, grpsts))
+            stop_functime('kmd complete')
+
+        if params.MZRTplt:
+            self._create_or_reset('mzrt', 'm/z vs RT plot',
+                lambda: plot_mzrt(self, 'mzrt', self.ui.frame_mzrt, iondictfile, dfs, grpsts),
+                lambda: self.mzrt.reset(iondictfile, dfs, grpsts))
+            stop_functime('mzrt complete')
+
+        if params.Volcanoplt:
+            self._create_or_reset('volcano', 'volcano plot',
+                lambda: plot_volcano(self, 'volcano', self.ui.frame_volcano, iondictfile, dfs, grpsts),
+                lambda: self.volcano.reset(iondictfile, dfs, grpsts))
+            stop_functime('volcano complete')
+
+        self._create_or_reset('heatmap', 'heatmap',
+            lambda: plot_heatmap(self, 'heatmap', self.ui.frame_heatmap, pltfile),
+            lambda: self.heatmap.reset(self, 'heatmap', self.ui.frame_heatmap, pltfile))
+        stop_functime('heatmap complete')
+
+        # abundplt/spec are only ever (re)drawn for the currently picked
+        # feature via _refresh_highlight, not here -- just make sure they
+        # exist when needed.
+        self._create_or_reset('abundplt', 'abundance plot', lambda: plot_abund(self, 'abund'))
+        if self.fragfilename != '':
+            self._create_or_reset('spec', 'spectrum plot', lambda: show_spectrum(self, 'spec'))
+
+        self._create_or_reset('samplecorr', 'sample correlation plot',
+            lambda: plot_samplecorr(self, 'samplecorr', self.ui.frame_samplecorr, iondictfile, dfs, grpsts),
+            lambda: self.samplecorr.reset(iondictfile, dfs, grpsts))
+        stop_functime('samplecorr complete')
+
     def run_analysis(self):
         # Ignore re-clicks while an analysis is already running on the worker thread.
         if getattr(self, '_analysis_thread', None) is not None and self._analysis_thread.isRunning():
@@ -1027,51 +1159,8 @@ class MainWindow(QMainWindow):
         # Used for point opacity based on abundance colouring
         iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         self.analysis_paramsgui.maxval = iondict['logmax'].max()
-        
-        if self.analysisrun:
-            self.regenerateplts()
-        else:
-            self.ftplt = self.safe_generate('feature plot', show_featureplt, self, 'featureplt', self.ui.frame_featureplt, self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
-            stop_functime('ftplt complete')
 
-            self.dend = self.safe_generate('dendrogram', plot_dendrogram, self, 'dend', self.ui.frame_dend, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
-            stop_functime('dendrogram complete')
-
-            if self.analysis_paramsgui.PCA:
-                self.pca = self.safe_generate('PCA/NMDS plot', plot_PCA, self, 'pca', self.ui.frame_pca, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
-                stop_functime('nmds complete')
-
-            if self.analysis_paramsgui.FC3Dplt:
-                self.fc3d = self.safe_generate('3D fold-change plot', plot_fc3d, self, 'fc3d', self.ui.frame_fc3d,  self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
-                stop_functime('fc3d complete')
-
-            if self.analysis_paramsgui.KMD:
-                self.kmd = self.safe_generate('Kendrick mass defect plot', kendrick, self, 'kmd', self.ui.frame_kmd, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
-                stop_functime('kmd complete')
-
-            if self.analysis_paramsgui.MZRTplt:
-                self.mzrt = self.safe_generate('m/z vs RT plot', plot_mzrt, self, 'mzrt', self.ui.frame_mzrt, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
-                stop_functime('mzrt complete')
-
-            if self.analysis_paramsgui.Volcanoplt:
-                self.volcano = self.safe_generate('volcano plot', plot_volcano, self, 'volcano', self.ui.frame_volcano, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
-                stop_functime('volcano complete')
-
-            self.heatmap = self.safe_generate('heatmap', plot_heatmap, self,  'heatmap', self.ui.frame_heatmap, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'))
-            stop_functime('heatmap complete')
-
-            self.abundplt = plot_abund(self, 'abund')
-
-            if self.fragfilename != '':
-                self.spec = show_spectrum(self, 'spec')
-
-            if self.analysis_paramsgui.CVfil:
-                self.prevcv = self.safe_generate('CV plot', prev_cv, self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none')
-                stop_functime('cvplt complete')
-
-            self.samplecorr = self.safe_generate('sample correlation plot', plot_samplecorr, self, 'samplecorr', self.ui.frame_samplecorr, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
-            stop_functime('samplecorr complete')
-        
+        self._generate_plots()
         self.analysisrun = True
         
         #text = open(self.analysis_paramsgui.outputdir / 'analysisinfo.txt').read() #writes output text to report tab
@@ -1139,19 +1228,20 @@ class MainWindow(QMainWindow):
             self.analysis_paramsgui.blnkgrp = ''
         self.analysis_paramsgui.blnkfltr = self.ui.checkBox_blankfilter.isChecked()
 
-        if len(self.querys) == 0:
+        if len(self.groupsetmodel) == 0:
             if self.analysis_paramsgui.blnkfltr:
                 UIFunctions.addgroup(self, 'Features not in blanks')
-                self.querys[0].src = self.querys[0].excl
-                self.querys[0].src.remove(self.analysis_paramsgui.blnkgrp)
-                self.querys[0].excl = [self.analysis_paramsgui.blnkgrp]
+                src = list(self.groupsetmodel.selected.excl)
+                src.remove(self.analysis_paramsgui.blnkgrp)
+                self.groupsetmodel.update(self.groupsetmodel.selected_index,
+                    src=src, excl=[self.analysis_paramsgui.blnkgrp])
             else:
                 UIFunctions.addgroup(self, 'All features')
-                self.querys[0].src = self.querys[0].excl
-                self.querys[0].excl = []
+                self.groupsetmodel.update(self.groupsetmodel.selected_index,
+                    src=self.groupsetmodel.selected.excl, excl=[])
             UIFunctions.updategroups(self)
         else:
-            self.selset = self.ui.listWidget_pltgrps.currentRow()
+            self.groupsetmodel.select(self.ui.listWidget_pltgrps.currentRow())
             UIFunctions.writegroups(self)
             UIFunctions.updategroups(self)
         
@@ -1176,25 +1266,9 @@ class MainWindow(QMainWindow):
         
 
         
-        tempquerydic = {}
-        for pos in range(len(self.querys)):
-            tempquery = query()
-            tempquery.colour = str(self.querys[pos].colour)
-            tempquery.name = self.querys[pos].name
-            tempquery.excl = ' '.join(self.querys[pos].excl)
-            tempquery.incl = ' '.join(self.querys[pos].incl)
-            tempquery.src = ' '.join(self.querys[pos].src)
-            tempquerydic[pos] = tempquery
-            
-        querydict = {}
-        for elem in tempquerydic:
-            tempquerydic[elem].excl += ' ' + self.analysis_paramsgui.graphfilters
-            queryname = tempquerydic[elem].src + ' +' + tempquerydic[elem].incl + ' -' + tempquerydic[elem].excl + ' c=' + tempquerydic[elem].colour + ' n=' + tempquerydic[elem].name
-            tempquerydic[elem].src = tempquerydic[elem].src.split()
-            tempquerydic[elem].incl = tempquerydic[elem].incl.split()
-            tempquerydic[elem].excl = tempquerydic[elem].excl.split()
-            querydict[queryname] = tempquerydic[elem]
-        
+        # Build the {descriptive_name: GroupSet} mapping MSFaST/plotting
+        # consume, merging in the active graph-level filters (cv/rel/insource).
+        querydict = build_query_dict(self.groupsetmodel, self.analysis_paramsgui.graphfilters)
         self.analysis_paramsgui.querydict = querydict
         self.analysis_paramsgui.querylist = list(querydict.keys())
         
@@ -1257,46 +1331,15 @@ class MainWindow(QMainWindow):
     
     
     def regenerateplts(self):
-        pltfile = self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv')
-        dfs = self.filtereddfs
-        grpsts = self.groupsets
-    
-        if self.analysis_paramsgui.CVfil:
-            self.safe_generate('CV plot', self.prevcv.reset, self, '', '')
-            stop_functime('cvplt complete')
+        """Re-render plots in place (e.g. from the dialog's "Apply" button)
+        without re-running the analysis pipeline.
 
-        self.safe_generate('feature plot', self.ftplt.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
-        stop_functime('ftplt complete')
-
-        self.safe_generate('dendrogram', self.dend.reset, pltfile, '', '')
-        stop_functime('dendrogram complete')
-
-        if self.analysis_paramsgui.PCA:
-            self.safe_generate('PCA/NMDS plot', self.pca.reset, pltfile, '', '')
-            stop_functime('nmds complete')
-
-        if self.analysis_paramsgui.FC3Dplt:
-            self.safe_generate('3D fold-change plot', self.fc3d.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
-            stop_functime('fc3d complete')
-
-        if self.analysis_paramsgui.KMD:
-            self.safe_generate('Kendrick mass defect plot', self.kmd.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
-            stop_functime('kmd complete')
-
-        if self.analysis_paramsgui.MZRTplt:
-            self.safe_generate('m/z vs RT plot', self.mzrt.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
-            stop_functime('mzrt complete')
-
-        if self.analysis_paramsgui.Volcanoplt:
-            self.safe_generate('volcano plot', self.volcano.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
-            stop_functime('volcano complete')
-
-        self.safe_generate('heatmap', self.heatmap.reset, self,  'heatmap', self.ui.frame_heatmap, pltfile)
-        stop_functime('heatmap complete')
-
-        self.safe_generate('sample correlation plot', self.samplecorr.reset, self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
-        stop_functime('samplecorr complete')
-    
+        Delegates to the same create-or-reset logic used after a fresh
+        analysis, so a plot that doesn't exist yet (e.g. because the prior
+        analysis had it disabled) is created rather than crashing on
+        ``.reset()``.
+        """
+        self._generate_plots()
         self.ui.label_status.setText('Update Complete')
 
         
