@@ -248,7 +248,7 @@ def runttest(analysis_params, statstgrps, groupsets):
     msdata_teststats['T'] = tstat(msdata_teststats[('average', statstgrps[0])], msdata_teststats[('combASD', statstgrps[0])], msdata_teststats[('neff', statstgrps[0])], msdata_teststats[('average', statstgrps[1])], msdata_teststats[('combASD', statstgrps[1])], msdata_teststats[('neff', statstgrps[1])])
     msdata_teststats['deg'] = msdata_teststats[('neff', statstgrps[0])] + msdata_teststats[('neff', statstgrps[1])] - 2
     msdata_teststats['p'] = (1 - stats.t.cdf(msdata_teststats['T'], msdata_teststats['deg'])) * 2
-    msdata_teststats['p'][msdata_teststats['p'] <= minval] = minval
+    msdata_teststats.loc[msdata_teststats['p'] <= minval, 'p'] = minval
     msdata_teststats['logp'] = np.log10(msdata_teststats['p']) 
     
     # Save msdata_teststats
