@@ -12,6 +12,16 @@ plot name) instead. Existing call sites that index by name and field (e.g.
 ``self.canvas['heatmap']`` or ``parent.fig[currplt] = Figure()``) keep
 working completely unchanged, since each field is exposed as a dict-like
 view over the same underlying slots.
+
+Each field view's keys are exactly the plot names that field has actually
+been assigned for -- matching how the six dicts behaved independently
+before (a plot could have a canvas but no highlight marker yet, and
+``'name' in self.highlight`` would be False even though
+``'name' in self.canvas`` was True). A bare ``None`` default can't express
+that distinction, since a field that genuinely was never set and one that's
+deliberately holding ``None`` would be indistinguishable -- so unset fields
+use the ``_UNSET`` sentinel instead, and every view treats a field holding
+it as "this key doesn't exist," consistent with plain dict semantics.
 """
 
 from collections.abc import MutableMapping
@@ -19,15 +29,17 @@ from dataclasses import dataclass
 
 FIELDS = ('fig', 'canvas', 'pltlayout', 'toolbar', 'ax', 'highlight')
 
+_UNSET = object()
+
 
 @dataclass
 class PlotSlot:
-    fig: object = None
-    canvas: object = None
-    pltlayout: object = None
-    toolbar: object = None
-    ax: object = None
-    highlight: object = None
+    fig: object = _UNSET
+    canvas: object = _UNSET
+    pltlayout: object = _UNSET
+    toolbar: object = _UNSET
+    ax: object = _UNSET
+    highlight: object = _UNSET
 
 
 class _PlotFieldView(MutableMapping):
@@ -38,7 +50,10 @@ class _PlotFieldView(MutableMapping):
         self._field = field_name
 
     def __getitem__(self, key):
-        return getattr(self._slots[key], self._field)
+        value = getattr(self._slots[key], self._field)
+        if value is _UNSET:
+            raise KeyError(key)
+        return value
 
     def __setitem__(self, key, value):
         if key not in self._slots:
@@ -46,13 +61,16 @@ class _PlotFieldView(MutableMapping):
         setattr(self._slots[key], self._field, value)
 
     def __delitem__(self, key):
-        setattr(self._slots[key], self._field, None)
+        if key not in self._slots or getattr(self._slots[key], self._field) is _UNSET:
+            raise KeyError(key)
+        setattr(self._slots[key], self._field, _UNSET)
 
     def __iter__(self):
-        return iter(self._slots)
+        return (key for key, slot in self._slots.items()
+                if getattr(slot, self._field) is not _UNSET)
 
     def __len__(self):
-        return len(self._slots)
+        return sum(1 for _ in self)
 
 
 class PlotSlotRegistry:
