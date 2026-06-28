@@ -1,6 +1,6 @@
 site_name: MPACT
 site_description: Documentation for MPACT, a desktop tool for mass-spectrometry / natural-products metabolomics data analysis
-repo_url: https://github.com/BalunasLab/mpact
+repo_url: https://github.com/robertsamples/mpact
 edit_uri: edit/main/docs/
 
 theme:
