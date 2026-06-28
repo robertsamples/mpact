@@ -261,7 +261,13 @@ class plot_abund():
         for result in results:
             result.result()
     
-        sns.barplot(ax=parent.ax[currplt][0], x="index", y="average", yerr=ionsummary["combASD"], errcolor=".2", edgecolor=".2", data=ionsummary, zorder=1)
+        # ionsummary is already one pre-aggregated row per category, not raw
+        # per-sample data -- use matplotlib's ax.bar (not sns.barplot) since
+        # newer seaborn no longer supports passing a manual yerr array through
+        # to barplot (it routes kwargs through an internal single-point
+        # "scout" call that only accepts a scalar/1-matching yerr).
+        parent.ax[currplt][0].bar(ionsummary["index"], ionsummary["average"], yerr=ionsummary["combASD"],
+                                  color=sns.color_palette()[0], ecolor=".2", edgecolor=".2", zorder=1, capsize=3)
         parent.ax[currplt][1].set_xticklabels(parent.ax[currplt][1].get_xticklabels(), rotation=90, horizontalalignment='center')
     
         ylims = (0, parent.ax[currplt][1].get_ylim()[1] * 1.05)
