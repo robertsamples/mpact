@@ -7,7 +7,11 @@ in `code/`.
 ## Running the app
 
 - **Windows:** double-click the `MPACT` shortcut, or `run.bat`. Non-fatal errors
-  terminate the program when launched this way.
+  terminate the program when launched this way. Both resolve paths relative to
+  the repo's actual location (`%~dp0` in `run.bat`) — if you move/re-clone the
+  repo, nothing needs editing. `run.bat` activates Anaconda then `cd`s into
+  `code\` (not the repo root) before launching, since several relative paths
+  in the app (`npatlas.tsv`, `compoundimages\`, etc.) assume that cwd.
 - **Mac / debugging:** launch via Spyder (Anaconda) → open `code/main.py` (NOT
   `__main__.py`) → Run.
 - Entry point is `code/main.py`. It must be run as `__main__`; `import main`
@@ -120,12 +124,27 @@ hand-written widget-sync code in `ui_functions.py`, kept thin.
   is for real selection events and toggles the highlight off if the same
   feature is clicked twice — calling it with the already-selected feature
   re-triggers that toggle, which is a bug, not a refresh.
+- Every matplotlib `pick_event` handler (`ui_plot.onpick`, heatmap's
+  `onpick8`, PCA's `picksample`) must call `plotting._is_duplicate_pick(parent,
+  event)` first and bail if it returns True. Matplotlib fires one pick_event
+  per artist that registers a hit, not one per click — a feature plotted in
+  more than one groupset/colour layer (separate `ax.scatter()` calls at the
+  same coordinates) otherwise fires the handler twice for one click, and the
+  second call's toggle-off logic undoes the first call's selection.
+- `importdependencies.checkdep()` is silent when nothing needs installing —
+  it runs on every launch (including every Spyder "Run File", which
+  re-executes `main.py`'s top level), so don't reintroduce a routine
+  "checking/already installed" print; only report actual installs/failures.
 
 ## Refactor status (Jun 2026)
 
 All 5 stages done & validated: (1) save/load param round-trip fix, (2) QThread
 worker so the UI doesn't freeze, (3) `fastcluster` optional accel +
 `low_memory` warning cleanup, (4) translator framework + GNPS2 reindex +
-auto-export, (5) MVC refactor for groupsets. Plus two user-reported bugfixes:
-highlight toggling on feature-info tab switches, and plot objects never
-(re)created when an optional output turns on mid-session. 57 passing tests.
+auto-export, (5) MVC refactor for groupsets. Plus several user-reported
+bugfixes: overplotted-feature pick-event duplication, a pandas-version-
+dependent `plot_abund` crash (`sns.barplot(x="index", ...)`), dependency-check
+console spam, and a stale `run.bat`/`MPACT.lnk` pointing at an old checkout
+location. Earlier bugfixes: highlight toggling on feature-info tab switches,
+and plot objects never (re)created when an optional output turns on
+mid-session. 57 passing tests.
