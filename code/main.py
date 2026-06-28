@@ -36,6 +36,7 @@ from MSFaST import run_MSFaST, analysis_parameters
 from groupsets import GroupSet, GroupSetModel, build_query_dict
 from plotslots import PlotSlotRegistry
 from paramfields import save_checkbox_fields
+from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
@@ -604,9 +605,9 @@ class MainWindow(QMainWindow):
         Concatenate the hits and sort them by parts-per-million (ppm).
         """
         self.hitdb = {}
-        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
         iondict['hits'] = ''
-        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=None).iloc[:, :3]
+        msdata = cached_read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=None).iloc[:, :3]
     
         for _, mrow in msdata.iterrows():
             # Iterates over iondict, filters DB matches within window.
@@ -776,7 +777,7 @@ class MainWindow(QMainWindow):
             return
 
         # Read iondict file to get ion data
-        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv',
+        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv',
                               sep=',', header=[0], index_col=[0])
 
         # Update volcano plot with the selected feature
@@ -874,8 +875,8 @@ class MainWindow(QMainWindow):
         if new_heatind == heatind:
             return
 
-        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0]).iloc[:, 2:]
+        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+        msdata = cached_read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0]).iloc[:, 2:]
         index = cmind[new_heatind]
         name = msdata.index.tolist()[index]
     
@@ -891,12 +892,17 @@ class MainWindow(QMainWindow):
         Args:
             savefile (Path): The path to the saved session file.
         """
+        # Loading a session may point at an entirely different dataset's
+        # output directory -- drop any cached reads from whatever was
+        # previously loaded/analysed.
+        invalidate_csv_cache()
+
         print("read1")
         with open(savefile, 'rb') as read_pi:
             print("read3")
             self.savedata = pickle.load(read_pi)
             print("read2")
-    
+
         # Assign the analysis parameters
         self.analysis_paramsgui = self.savedata['parameters']
             
@@ -1144,6 +1150,10 @@ class MainWindow(QMainWindow):
         if getattr(self, '_analysis_thread', None) is not None and self._analysis_thread.isRunning():
             return
         self.dbsearchdone = False
+        # iondict.csv/_filtered.csv/_summarydata.csv from any previous run
+        # are about to be superseded -- drop cached reads of them so feature
+        # selection etc. doesn't serve stale data from before this run.
+        invalidate_csv_cache()
         start_functime()
         self.enumerate_inputs()
         print('')
@@ -1194,7 +1204,7 @@ class MainWindow(QMainWindow):
         stop_functime('treemap complete')
         
         # Used for point opacity based on abundance colouring
-        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         self.analysis_paramsgui.maxval = iondict['logmax'].max()
 
         self._generate_plots()
@@ -1208,7 +1218,7 @@ class MainWindow(QMainWindow):
         # Writes filtering statistics in data review summary
         msdata_unformatted = pd.read_csv(self.analysis_paramsgui.filename, sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
         msdata_formatted = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_formatted.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-        msdata_filtered = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+        msdata_filtered = cached_read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
         #test = open('testionfilters.pkl', 'wb') # this exports ionfilters as a pickle for debuging
         #pickle.dump(self.ionfilters, test)
         
@@ -1291,13 +1301,16 @@ class MainWindow(QMainWindow):
             self.atlas = self.atlas[self.atlas['genus'] == self.analysis_paramsgui.genus]
 
         
-        self.analysis_paramsgui.graphfilters = ''
+        # A list of active filter-name tokens, not a hand-built string --
+        # consumers that need the old space-joined string shape (e.g. an
+        # older .mpct save) go through groupsets.normalize_graphfilters().
+        self.analysis_paramsgui.graphfilters = []
         if self.ui.checkBox_cv.isChecked():
-            self.analysis_paramsgui.graphfilters += 'cv '
+            self.analysis_paramsgui.graphfilters.append('cv')
         if self.ui.checkBox_mp.isChecked():
-            self.analysis_paramsgui.graphfilters += 'rel '
+            self.analysis_paramsgui.graphfilters.append('rel')
         if self.ui.checkBox_decon.isChecked():
-            self.analysis_paramsgui.graphfilters += 'insource'
+            self.analysis_paramsgui.graphfilters.append('insource')
             self.analysis_paramsgui.deconthresh = float(self.ui.lineEdit_insourcethresh.text())
         
         
