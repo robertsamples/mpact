@@ -238,11 +238,17 @@ class plot_abund():
         # column out from under the hardcoded x="index" reference.
         ionsummary.index.name = None
         ionsummary = ionsummary.reset_index()
-    
+
+        # Use one explicit, shared palette keyed by biolgroup so the bar
+        # chart's per-group colors (left) match the stripplot's hue colors
+        # (right) instead of each picking its own default palette.
+        groups = sorted(msdata['biolgroup'].unique())
+        palette = dict(zip(groups, sns.color_palette(n_colors=len(groups))))
+
         # Define the plotting function for stripplot
         def plot_stripplot():
             sns.stripplot(ax=parent.ax[currplt][1], x="sample", y="abundance", hue="biolgroup",
-                          data=msdata, size=7, dodge=False, alpha=.5, zorder=2)
+                          data=msdata, palette=palette, size=7, dodge=False, alpha=.5, zorder=2)
     
         # Define the plotting function for pointplot
         def plot_pointplot():
@@ -266,8 +272,9 @@ class plot_abund():
         # newer seaborn no longer supports passing a manual yerr array through
         # to barplot (it routes kwargs through an internal single-point
         # "scout" call that only accepts a scalar/1-matching yerr).
+        barcolors = [palette[g] for g in ionsummary["index"]]
         parent.ax[currplt][0].bar(ionsummary["index"], ionsummary["average"], yerr=ionsummary["combASD"],
-                                  color=sns.color_palette()[0], ecolor=".2", edgecolor=".2", zorder=1, capsize=3)
+                                  color=barcolors, ecolor=".2", edgecolor=".2", zorder=1, capsize=3)
         parent.ax[currplt][1].set_xticklabels(parent.ax[currplt][1].get_xticklabels(), rotation=90, horizontalalignment='center')
     
         ylims = (0, parent.ax[currplt][1].get_ylim()[1] * 1.05)
