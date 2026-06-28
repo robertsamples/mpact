@@ -1,0 +1,63 @@
+site_name: MPACT
+site_description: Documentation for MPACT, a desktop tool for mass-spectrometry / natural-products metabolomics data analysis
+repo_url: https://github.com/BalunasLab/mpact
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Getting Started: getting-started.md
+  - User Guide:
+      - File Selection: user-guide/file-selection.md
+      - Filtering Settings: user-guide/filtering-settings.md
+      - Analysis Settings & Plot Feature Sets: user-guide/analysis-settings.md
+      - Running an Analysis: user-guide/running-analysis.md
+      - Outputs: user-guide/outputs.md
+  - Plots & Results:
+      - Data Review: plots/data-review.md
+      - Group Analysis: plots/group-analysis.md
+      - Multivariate Analysis: plots/multivariate.md
+      - m/z vs RT: plots/mz-rt.md
+      - Mass Defect: plots/mass-defect.md
+      - 3D Fold Change: plots/3d.md
+      - Volcano Plot: plots/volcano.md
+      - Heatmap: plots/heatmap.md
+  - Feature Info: feature-info.md
+  - Troubleshooting: troubleshooting.md
+  - Development: development.md
+  - Changelog: changelog.md
