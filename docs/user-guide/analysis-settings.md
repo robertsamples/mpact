@@ -1,5 +1,7 @@
 # Analysis Settings & Plot Feature Sets
 
+![MPACT analysis settings tab](../images/analysis-settings-tab.png)
+
 ## Group presence/absence threshold
 
 A relative or absolute group-parsing threshold determines whether a
@@ -47,6 +49,11 @@ whether it matches the set.
 To plot every feature in the dataset regardless of group, drag every group
 (except the blank/control group, if blank filtering is enabled) into "May
 be in".
+
+![Plot feature set Venn diagram example](../images/groupset-venn-diagram.png)
+*Example of which features in a set of biological groups (0 µM Ce, 250 µM
+Ce, and media control) will be plotted in a given colour, based on their
+presence/absence in these groups, as indicated by Venn diagrams.*
 
 !!! tip "Behind the scenes"
     Internally, each Plot Feature Set is a `GroupSet` object managed by a

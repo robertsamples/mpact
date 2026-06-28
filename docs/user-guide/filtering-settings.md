@@ -3,6 +3,8 @@
 MPACT can filter mispicked peaks, solvent-blank features, nonreproducible
 features, and in-source fragment ions, based on user-specified parameters.
 
+![MPACT filtering settings tab](../images/filtering-settings-tab.png)
+
 ## Mispicked peaks
 
 Identified as features similar in retention time and mass to a lower-mass,
@@ -36,6 +38,11 @@ the [Dendrogram](../plots/group-analysis.md#dendrogram) results to sanity
 check your threshold: pick the least stringent threshold before which
 clustering quality stops meaningfully improving.
 
+![Mispicked peak, blank, and nonreproducible feature diagram](../images/mispicked-blank-diagram.png)
+*Diagram demonstrating identification of groups that are incorrectly peak
+picked (peak-picking boxes split across an isotopic pattern),
+nonreproducible features, and features present in solvent blanks.*
+
 ## In-source fragment deconvolution
 
 In-source fragments are identified by building retention-time-bounded
@@ -45,3 +52,9 @@ the parent ion, and the lower-mass features in that cluster are filtered as
 likely in-source fragments. A high correlation threshold is recommended to
 avoid filtering out genuinely distinct analytes that happen to be
 co-regulated across samples.
+
+![In-source fragment diagram](../images/insource-fragment-diagram.png)
+*Diagram demonstrating identification of in-source fragments. A
+correlation matrix is used to deconvolute groups of features at the same
+retention time; the highest-mass feature in each cluster is assumed to be
+the molecular ion (denoted by a red star).*

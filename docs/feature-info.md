@@ -15,6 +15,12 @@ Switching tabs in the compound details window (e.g. from Abundance to
 Hits) does **not** change your selection or toggle the highlight — it just
 re-displays whatever feature is currently selected.
 
+![Feature info tab](images/feature-info-tab.png)
+*MPACT feature info tab showing a selected feature and its associated
+information, including the compound details window with combined
+uncertainty for the selected feature in biological groups (left) and
+technical uncertainty in individual samples (right).*
+
 ## Abundance tab
 
 - **Left plot:** group-level average abundance with the propagated
@@ -54,3 +60,6 @@ A text summary of the run — same content as the `analysisinfo.txt` file
 written to the output directory (see [Outputs](user-guide/outputs.md)) —
 so MPACT's run parameters can be reviewed later without re-opening the
 session.
+
+![Analysis info tab](images/analysis-info-tab.png)
+*MPACT analysis info tab.*

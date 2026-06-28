@@ -10,3 +10,8 @@ By default, technical replicates are averaged so NMDS runs at the
 sample level. To instead evaluate clustering of individual technical
 replicates, uncheck replicate averaging in the plot options dialog
 (the small square button in the plot's toolbar).
+
+![NMDS plot](../images/nmds-plot.png)
+*MPACT NMDS plot with technical-replicate averaging, showing differences
+between samples and biological groups, with shaded ovals denoting 95%
+confidence intervals.*
