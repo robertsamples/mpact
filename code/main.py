@@ -150,7 +150,11 @@ class AnalysisWorker(QObject):
 
     def run(self):
         try:
-            run_MSFaST(self.window)
+            result = run_MSFaST(self.window.analysis_paramsgui)
+            self.window.ionfilters = result.ionfilters
+            self.window.groupionlists = result.groupionlists
+            self.window.groupsets = result.groupsets
+            self.window.filtereddfs = result.filtereddfs
         except Exception:
             import traceback
             traceback.print_exc()

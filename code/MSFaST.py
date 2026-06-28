@@ -52,12 +52,29 @@ class groupset:  # parses the ions to be plotted as a specific color based on th
 class analysis_parameters:
     """
     An empty class that is used as a placeholder to hold analysis parameters.
-    
+
     Attributes:
     - init (str): An initial string.
     """
     def __init__(self):
         self.init = ''
+
+
+class AnalysisResult:
+    """The output of ``run_MSFaST()``: everything it computes, bundled into
+    one plain object instead of written onto whichever object was passed in.
+
+    Attributes:
+    - ionfilters (dict): Per-filter-type ``ionfilter`` results (cv/relfil/insource).
+    - groupionlists (dict): Per-biological-group lists of failing ion IDs.
+    - groupsets (dict): Per-Plot-Feature-Set ``groupset`` objects.
+    - filtereddfs (dict): Per-Plot-Feature-Set filtered peak tables.
+    """
+    def __init__(self, ionfilters, groupionlists, groupsets, filtereddfs):
+        self.ionfilters = ionfilters
+        self.groupionlists = groupionlists
+        self.groupsets = groupsets
+        self.filtereddfs = filtereddfs
 
 
 #---Methods---
@@ -141,30 +158,34 @@ def importdata():
     iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=False)
 
 
-def run_MSFaST(self):
+def run_MSFaST(params):
     """
-    Runs MSFaST analysis with the given analysis parameters and data.
-    
+    Runs the MSFaST analysis pipeline for the given analysis parameters.
+
     Args:
-    self: Object instance of the MSFaST class.
-    
+    params (analysis_parameters): The analysis parameters/inputs to run.
+
     Returns:
-    None
+    AnalysisResult: everything the pipeline computed (ionfilters,
+    groupionlists, groupsets, filtereddfs) -- nothing is written onto
+    ``params`` or any other caller-supplied object.
     """
     start_time()
 
-    # Import analysis parameters and data
+    # importdata()/filter.py/stats.py read and mutate this same object via
+    # the `global analysis_params` they declare -- unchanged from before,
+    # just no longer aliased through a caller-supplied `self.analysis_paramsgui`.
     global analysis_params
-    analysis_params = self.analysis_paramsgui
+    analysis_params = params
     importdata()
 
     # Filtering and error propagation
     print('Filtering data')
-    self.ionfilters = {}
+    ionfilters = {}
     if analysis_params.relfil:
-        self.ionfilters = filter.relationalfilter(analysis_params, self.ionfilters)
+        ionfilters = filter.relationalfilter(analysis_params, ionfilters)
         if analysis_params.merge:
-            filter.mergeions(analysis_params, self.ionfilters)
+            filter.mergeions(analysis_params, ionfilters)
     if analysis_params.grpave:
         stats.groupave(analysis_params)
         print('Parsing ion lists')
@@ -178,20 +199,17 @@ def run_MSFaST(self):
         iondict['pass_blnkfil'] = ~iondict.index.isin(groupionlists[analysis_params.blnkgrp])
         iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
     if analysis_params.CVfil:
-        self.ionfilters = filter.cvfilter(analysis_params, self.ionfilters, analysis_params.cvthresh)
+        ionfilters = filter.cvfilter(analysis_params, ionfilters, analysis_params.cvthresh)
     if analysis_params.decon:
-        self.ionfilters = filter.decon(analysis_params, self.ionfilters)
-    filter.applyfilters(analysis_params, self.ionfilters)
+        ionfilters = filter.decon(analysis_params, ionfilters)
+    filter.applyfilters(analysis_params, ionfilters)
     if analysis_params.prperr:
         stats.properr(analysis_params)
 
-    # Store group ion lists for later use
-    self.groupionlists = groupionlists
-
     # Parse ion lists and add filter lists
-    groupionlists['cv'] = self.ionfilters['cv'].ions if analysis_params.CVfil else []
-    groupionlists['relfil'] = self.ionfilters['relfil'].ions if analysis_params.relfil else []
-    groupionlists['insource'] = self.ionfilters['insource'].ions if analysis_params.decon else []
+    groupionlists['cv'] = ionfilters['cv'].ions if analysis_params.CVfil else []
+    groupionlists['relfil'] = ionfilters['relfil'].ions if analysis_params.relfil else []
+    groupionlists['insource'] = ionfilters['insource'].ions if analysis_params.decon else []
 
     # Add groups column to iondict csv
     iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
@@ -206,28 +224,26 @@ def run_MSFaST(self):
     # rather than each groupset() call below re-reading the file from disk
     # itself (previously: once per Plot Feature Set configured).
     iondict_by_compound = iondict.set_index('Compound')
-    self.groupsets, self.filtereddfs = {}, {}
+    groupsets, filtereddfs = {}, {}
     for elem in analysis_params.querylist:
-        self.groupsets[elem] = groupset(elem, analysis_params.querydict[elem], iondict_by_compound)
-        self.filtereddfs[elem] = filter.listfilter(iondict, self.groupsets[elem].ionlist, True)
+        groupsets[elem] = groupset(elem, analysis_params.querydict[elem], iondict_by_compound)
+        filtereddfs[elem] = filter.listfilter(iondict, groupsets[elem].ionlist, True)
 
 
     #block creates user specified plots some of these can be changed to eliminate a few arguments with data pulled from analysis_params
-    if analysis_params.FC:    
+    if analysis_params.FC:
         stats.runfc(analysis_params, analysis_params.statstgrps)
     if analysis_params.Ttest:
-        stats.runttest(analysis_params, analysis_params.statstgrps, self.groupsets)
-    
+        stats.runttest(analysis_params, analysis_params.statstgrps, groupsets)
+
     #---Analysis info file writing---
     runtime = stop_time()
     msdata_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'), sep = ',', header = [0, 1, 2], index_col = [0])
     msdata_header = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'), sep = ',', header = None, index_col = [0,1,2]).iloc[:3,:].transpose()
     msdata_header.columns = ['Biolgroup', 'Sample', 'Injection']
-    
+
     iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep = ',', header = [0], index_col = [0])
-    self.unfilteredgroupsets, self.unfiltereddfs = {}, {}
-    
-    self.analysis_paramsgui = analysis_params
+
     msdata_unformatted = pd.read_csv(analysis_params.filename, sep = ',', header = [0, 1, 2], index_col = [0, 1, 2]) #imports feature list
     msdata = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.name), sep = ',', header = [0, 1, 2], index_col = [0, 1, 2])
     msdata_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'), sep = ',', header = [0, 1, 2], index_col = [0, 1, 2])
@@ -254,35 +270,35 @@ def run_MSFaST(self):
                             'max isotopic peak shift: ' + str(analysis_params.maxisowin) + '\n',
                             '\n',
                             'Total features: ' + str(len(msdata.index)) + '\n'])
-    
+
 
     text = ''
-    if self.analysis_paramsgui.relfil:
-        text += 'Features failing peak correction filtering: ' + str(len(self.ionfilters['relfil'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.ionfilters['relfil'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
-    if self.analysis_paramsgui.blnkfltr: #FIX THIS REF TO "BLANKS"
-        text += 'Features failing blank filtering: ' + str(len(self.groupionlists[analysis_params.blnkgrp])) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.groupionlists[analysis_params.blnkgrp]) / len(msdata_unformatted.index), 2)) + '%\n'
-    if self.analysis_paramsgui.decon:
-        text += 'Features failing blank filtering: ' + str(len(self.ionfilters['insource'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.ionfilters['insource'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
-    if self.analysis_paramsgui.CVfil:
-        text += 'Features failing CV filtering: ' + str(len(self.ionfilters['cv'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(self.ionfilters['cv'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
+    if analysis_params.relfil:
+        text += 'Features failing peak correction filtering: ' + str(len(ionfilters['relfil'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['relfil'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
+    if analysis_params.blnkfltr: #FIX THIS REF TO "BLANKS"
+        text += 'Features failing blank filtering: ' + str(len(groupionlists[analysis_params.blnkgrp])) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(groupionlists[analysis_params.blnkgrp]) / len(msdata_unformatted.index), 2)) + '%\n'
+    if analysis_params.decon:
+        text += 'Features failing blank filtering: ' + str(len(ionfilters['insource'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['insource'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
+    if analysis_params.CVfil:
+        text += 'Features failing CV filtering: ' + str(len(ionfilters['cv'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['cv'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
     text += 'Features failing any filters: ' + str(len(msdata_unformatted.index) - len(msdata_filtered.index)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * (len(msdata_unformatted.index) - len(msdata_filtered.index)) / len(msdata_unformatted.index), 2)) + '%\n'
     text += 'Features passing all filters: ' + str(len(msdata_filtered.index)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(msdata_filtered.index) / len(msdata_unformatted.index), 2)) + '%\n'
-    
+
     analysisrec.writelines([text,
                             '\n',
                             '\n',
                             '---Graphing Parameters---\n',
                             'Filters: \n'])
-    
+
     for elem in normalize_graphfilters(analysis_params.graphfilters):
         analysisrec.write(elem + '\n')
-    
+
     analysisrec.writelines(['\n',
                             '-Groups-\n'])
-    
+
     for elem in analysis_params.querylist:
         analysisrec.write(elem + '\n')
-    
+
     analysisrec.writelines(['\n',
                             '-Plots generated-\n',
                             'RT/mz: ' + str(analysis_params.MZRTplt) + '\n',
@@ -295,3 +311,10 @@ def run_MSFaST(self):
                             'Dendrogram (ward) Filtered: ' + str(analysis_params.Dendrogram) + '\n',
                             'Volcano plot: ' + str(analysis_params.Volcanoplt) + ' ' + str(analysis_params.statstgrps) + '\n',])
     analysisrec.close()
+
+    return AnalysisResult(
+        ionfilters=ionfilters,
+        groupionlists=groupionlists,
+        groupsets=groupsets,
+        filtereddfs=filtereddfs,
+    )
