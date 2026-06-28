@@ -8,6 +8,7 @@ from main import MainWindow, start_functime, stop_functime, reset_runtime, ftrdi
 #import masstdriver #from old version of masst search push
 import webbrowser #may not be needed now
 from mzmineimport import format_check
+from paramfields import restore_checkbox_fields
 
 import sys
 import pandas as pd
@@ -538,16 +539,10 @@ class UIFunctions(MainWindow):
         restore('ppm threshold', lambda: self.ui.lineEdit_ppmthresh.setText(str(getattr(p, 'ppmthresh', ''))))
 
         # ----- plot toggles -----
-        restore('PCA', lambda: self.ui.checkBox_pca.setChecked(p.PCA))
-        restore('dendrogram', lambda: self.ui.checkBox_dend.setChecked(p.Dendrogram))
-        restore('m/z-RT plot', lambda: self.ui.checkBox_mzrt.setChecked(p.MZRTplt))
-        restore('KMD plot', lambda: self.ui.checkBox_kmd.setChecked(p.KMD))
-        restore('fold change', lambda: self.ui.checkBox_fc.setChecked(p.FC))
-        restore('3D fold change', lambda: self.ui.checkBox_3dfc.setChecked(p.FC3Dplt))
-        restore('t-test', lambda: self.ui.checkBox_ttest.setChecked(p.Ttest))
-        restore('volcano', lambda: self.ui.checkBox_volcano.setChecked(p.Volcanoplt))
-        restore('FDR', lambda: self.ui.checkBox_FDR.setChecked(p.FDR))
-        restore('bootstrap', lambda: self.dialog.ui.checkBox_bootstrap.setChecked(p.bootstrap))
+        # Plain 1:1 checkbox fields (no branching/derived values) -- see
+        # paramfields.py for the shared save/restore schema; the matching
+        # save side is enumerate_inputs()'s save_checkbox_fields() call.
+        restore_checkbox_fields(self, p, restore)
 
         # ----- statistics / plot params -----
         restore('experimental group', lambda: self.ui.combo_expgrp.setCurrentText(str(p.statstgrps[0])))
@@ -555,7 +550,6 @@ class UIFunctions(MainWindow):
         restore('colour scheme', lambda: self.dialog.ui.combo_colorscheme.setCurrentText(p.colorscheme))
         restore('p/q threshold', lambda: self.dialog.ui.lineEdit_pqthresh.setText(str(p.pqthresh)))
         restore('fold-change threshold', lambda: self.dialog.ui.lineEdit_fcthresh.setText(str(p.fcthresh)))
-        restore('mass defect guide', lambda: self.dialog.ui.checkBox_mdguide.setChecked(p.mdguide))
                 
     def getfilename(self):
             self.filename, _  = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir ,

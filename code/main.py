@@ -35,6 +35,7 @@ import files
 from MSFaST import run_MSFaST, analysis_parameters
 from groupsets import GroupSet, GroupSetModel, build_query_dict
 from plotslots import PlotSlotRegistry
+from paramfields import save_checkbox_fields
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
@@ -540,16 +541,34 @@ class MainWindow(QMainWindow):
     
         msdata = pd.read_csv(self.filename, sep=',', header=None, index_col=[0, 1, 2], low_memory=False)
         groups = []
-    
+        unresolved = []
+
         for elem in msdata.iloc[2]:
-            biolgroup = combinedmetadata.loc[elem, 'Biological_Group']
             try:
+                biolgroup = combinedmetadata.loc[elem, 'Biological_Group']
+                if isinstance(biolgroup, pd.Series):
+                    # A duplicate Injection entry in the joined metadata makes
+                    # .loc[] return a Series instead of a scalar -- take the
+                    # first rather than letting the `in`/append below raise
+                    # on an ambiguous Series truth value.
+                    biolgroup = biolgroup.iloc[0]
                 if biolgroup not in groups:
-                    groups.append(combinedmetadata.loc[elem, 'Biological_Group'])
+                    groups.append(biolgroup)
             except Exception:
-                print(biolgroup)
-                print("")
-                print(groups)
+                unresolved.append(elem)
+
+        if unresolved:
+            # Report once, not once per row -- a dataset with many injections
+            # missing from the metadata join would otherwise spam the console
+            # with no visible indication anything is wrong, and self.groups
+            # would silently end up incomplete with no signal to the combo
+            # boxes/groupset editor that consume it.
+            unique_unresolved = sorted(set(map(str, unresolved)))
+            print(f"getgroups: {len(unique_unresolved)} injection(s) had no "
+                  f"matching Biological_Group and were skipped: {unique_unresolved}")
+            self.error(f"{len(unique_unresolved)} injection(s) missing from "
+                       "metadata -- biological group list may be incomplete.")
+
         self.groups = groups
     
         # Set experimental and control grp defaults in ui
@@ -1310,20 +1329,14 @@ class MainWindow(QMainWindow):
             self.analysis_paramsgui.cvparam = 'median CV'
             
         
-        self.analysis_paramsgui.PCA = self.ui.checkBox_pca.isChecked()
-        self.analysis_paramsgui.Dendrogram = self.ui.checkBox_dend.isChecked()
-        self.analysis_paramsgui.bootstrap = self.dialog.ui.checkBox_bootstrap.isChecked()
-        self.analysis_paramsgui.MZRTplt = self.ui.checkBox_mzrt.isChecked()
-        self.analysis_paramsgui.KMD = self.ui.checkBox_kmd.isChecked()
-        self.analysis_paramsgui.mdguide = self.dialog.ui.checkBox_mdguide.isChecked()
-        self.analysis_paramsgui.FC = self.ui.checkBox_fc.isChecked()
-        self.analysis_paramsgui.FC3Dplt = self.ui.checkBox_3dfc.isChecked()
-        self.analysis_paramsgui.Ttest = self.ui.checkBox_ttest.isChecked()
-        self.analysis_paramsgui.Volcanoplt = self.ui.checkBox_volcano.isChecked()
+        # Plain 1:1 checkbox fields (no branching/derived values) -- see
+        # paramfields.py for the shared save/restore schema; the matching
+        # restore side is loadsession()'s restore_checkbox_fields() call.
+        save_checkbox_fields(self, self.analysis_paramsgui)
+
         self.analysis_paramsgui.pqthresh = float(self.dialog.ui.lineEdit_pqthresh.text())
         self.analysis_paramsgui.fcthresh = float(self.dialog.ui.lineEdit_fcthresh.text())
         self.analysis_paramsgui.colorscheme = self.dialog.ui.combo_colorscheme.currentText()
-        self.analysis_paramsgui.FDR = self.ui.checkBox_FDR.isChecked()
         self.analysis_paramsgui.relfil = self.ui.checkBox_mp.isChecked()
         self.analysis_paramsgui.CVfil = self.ui.checkBox_cv.isChecked()
         self.analysis_paramsgui.decon = self.ui.checkBox_decon.isChecked()

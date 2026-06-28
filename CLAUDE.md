@@ -143,25 +143,27 @@ hand-written widget-sync code in `ui_functions.py`, kept thin.
   When adding a 7th piece of per-plot state, add it to `PlotSlot`/`FIELDS`
   in `plotslots.py` rather than a new bare dict on `MainWindow`.
 
-## Known refactor backlog (not yet done)
+## Known refactor backlog
 
-Lower-priority siblings of the groupset/plot-slot refactors above,
-identified but intentionally deferred — pick up if/when touching this code
-for other reasons, not worth a dedicated pass on their own yet:
+Lower-priority siblings of the groupset/plot-slot refactors above:
 
-- **`self.groups` can silently end up incomplete.** `getgroups()` rebuilds
-  this list and swallows per-row errors with a bare `except Exception:
-  print(...)`, continuing anyway. Several consumers (combo-boxes,
-  `UIFunctions.addgroup`) assume the list is complete with no signal if it
-  isn't. Consider failing loudly (or surfacing a UI warning) instead of a
-  silent partial list.
-- **`enumerate_inputs`/`loadsession` have no shared schema for
-  `analysis_parameters`.** ~40 fields each, hand-mirrored across `main.py`
-  (save) and `ui_functions.py` (restore) — every new param means editing
-  both by hand. Lower urgency than it sounds: `loadsession` already
-  restores each field independently (`restore()` helper), so a bad/missing
-  field can't cascade and take down the rest of restoration — the
-  remaining cost is pure maintenance friction, not a correctness risk.
+- ~~`self.groups` can silently end up incomplete~~ — **done.** `getgroups()`
+  now catches the lookup itself (not just the append), handles a
+  duplicate-`Injection`-row edge case that previously raised inside the
+  `try`, and reports once via `self.error()` plus a single consolidated
+  console line instead of either crashing or printing silently per row.
+- ~~`enumerate_inputs`/`loadsession` have no shared schema~~ — **partially
+  done.** `paramfields.py` now holds a shared table (`CHECKBOX_FIELDS`) for
+  the plain 1:1 boolean toggle fields (`PCA`, `Dendrogram`, `bootstrap`,
+  `MZRTplt`, `KMD`, `mdguide`, `FC`, `FC3Dplt`, `Ttest`, `Volcanoplt`,
+  `FDR`) — adding one of *this kind* of field means one entry in
+  `paramfields.py`, not a hand-mirrored line in both `main.py` and
+  `ui_functions.py`. Deliberately left out of the table (and still
+  hand-written): fields with backward-compat `getattr(..., default)`
+  fallbacks, compound/derived fields (`statstgrps` from two combo boxes),
+  and branching fields (blank-filter abs/rel, max-iso-shift combo-by-text) —
+  abstracting those into a generic table would obscure logic that's
+  clearer inline, for marginal duplication savings.
 
 ## Refactor status (Jun 2026)
 
