@@ -178,6 +178,40 @@ Lower-priority siblings of the groupset/plot-slot refactors above:
   the automatic `export_filtered_outputs()` export. Worth migrating to
   reuse the tested matching logic instead of maintaining two
   implementations — logged here, not yet started.
+- **`run_MSFaST`'s blank-filter block re-reads `_formatted.csv` right
+  after `importdata()` already had the identical data in memory**
+  (`MSFaST.py`, the `if analysis_params.blnkfltr:` block) — same shape as
+  the `importdata()`/`iondict` fix already done, but **tried this one and
+  found it's the risky kind, not the safe kind**: `importdata()`'s
+  in-memory frame is indexed by Compound (`index_col=[0]`); the blank-filter
+  block needs Compound as a plain column instead (`index_col=None`).
+  Deriving that via `.reset_index()` produces a *different* MultiIndex
+  label for that column than `pd.read_csv` does (pandas' own
+  `Unnamed: 0_level_0`/`Unnamed: 0_level_1` placeholder convention for
+  blank multi-row header cells vs. `reset_index()`'s `'index'`/`''`/`''`).
+  That wouldn't matter for a leaf computation, but this block's result
+  gets written *back* into the canonical `_formatted.csv` — and 12
+  separate places elsewhere read that file with `header=[2]` (flattening
+  to the bottom header level), almost certainly expecting that column to
+  come out named literally `'Compound'`. Getting the label wrong here
+  would silently corrupt a shared, widely-read file rather than just one
+  derived value. Not done; would need either a verified-safe way to
+  reconstruct that exact column label, or confirmation that none of those
+  12 read sites actually depend on it (not yet checked across all 12).
+- **`iondict.csv` is read-modify-written as shared, accumulating state
+  across `filter.py`'s `relationalfilter`/`cvfilter`/`decon` and
+  `stats.py`'s `properr`/`runfc`/`runttest`** (7-8 read+write round-trips
+  for one analysis run) — each function adds its own column(s), and
+  genuinely needs the *previous* function's writes already applied, so
+  this isn't a "redundant read of unchanged data" the way the importdata
+  cases were; it's the disk literally being used as the shared mutable
+  state connecting a chain of functions across two modules. Fixing this
+  for real means threading an `iondict` DataFrame through every one of
+  those function signatures (`filter.py`/`stats.py`/`MSFaST.py` call
+  sites all change together) rather than a one-function patch — this is
+  the "bigger, multi-session" item flagged in earlier architecture
+  discussion, not a quick incremental slice. Logged for visibility, not
+  started.
 
 ## Refactor status (Jun 2026)
 
