@@ -48,6 +48,16 @@ that way. Required deps (gate startup): `epam.indigo`→`indigo`, `UpSetPlot`→
   `MSFaST.py` (analysis driver `run_MSFaST` + `analysis_parameters`),
   `pvclust.py` (bootstrap dendrogram), `translators.py` (import/export),
   `mzmineimport.py` (format conversion), `getfragdb.py`, `mspwriter.py`.
+- **Qt-free helper modules extracted from `MainWindow` methods** (so the
+  logic is unit-testable without a GUI — `main.py` can't be imported
+  standalone, see above): `csvcache.py` (memoizing `pd.read_csv` for static
+  per-run output files), `groupsets.py` (Plot Feature Set MVC),
+  `plotslots.py` (per-plot widget-state registry), `paramfields.py`
+  (shared save/restore schema for simple `analysis_parameters` checkbox
+  fields), `biogroups.py` (`getgroups()`'s metadata-join/group-derivation
+  core), `dbsearch.py` (`fulldbsearch()`'s NPAtlas ppm-window matching
+  core). Each corresponding `MainWindow` method is now a thin wrapper:
+  call the module function, then apply the result to widgets/`self`.
 - **Canonical peak table** (what MPACT consumes; Progenesis = native): CSV, 3
   header rows; row 2 = `Compound,m/z,Retention time (min),<injections...>`;
   col0 = `RT_mz` id, col1 = m/z, col2 = RT. Rows 0–1 are overwritten by
