@@ -34,6 +34,9 @@ formatting options are available in the matplotlib toolbar under each
 plot, and additional per-plot customization is available in each plot's
 options dialog (the small button in the toolbar).
 
+![Main MPACT window](images/main-window.png)
+*Main MPACT window displaying key user interface elements.*
+
 The basic workflow is:
 
 1. **File Selection** — point MPACT at your peak table, sample list,
@@ -59,3 +62,6 @@ MPACT automatically writes to the output directory at the end of a run.
 Use **Import from .MPCT session file** and select the save file — MPACT
 will regenerate a working folder with all raw data and outputs alongside
 it.
+
+![Loading a .mpct file](images/load-mpct-file.png)
+*Loading a `.mpct` file from a previously run analysis.*

@@ -18,6 +18,14 @@ family traces on the mass-defect plot hints at its molecular character:
 - High slope: aliphatic hydrocarbons (maximum positive mass defect for a
   given mass), and fatty acids/lipids.
 
+![Mass defect plot](../images/mass-defect-plot.png)
+*MPACT mass defect plot. Note the trend of features with negative slope at
+the top of the chart, corresponding to salt clusters, as well as a series
+of low-mass features around 0.5 Da below the main feature cluster — likely
+unresolved doubly-charged dimer fragments. The main cluster sits in the
+region where polyketide synthase (PKS) products and amino acid derivatives
+are typically found.*
+
 Reference trendlines for saturated hydrocarbons, perbromocarbons, and
 polycarbonic acids can be toggled in the plot options dialog:
 
@@ -33,3 +41,8 @@ over/underflow is possible: heteroatom/halogen-rich analytes can show a
 small negative mass defect that's really a "wrapped" positive one, and
 many high-MW analytes (e.g. fatty acids) have a true mass defect above 1,
 which will visually roll over to a low value on the plot.
+
+![RefMet metabolite distribution on a mass defect plot](../images/mass-defect-refmet.png)
+*Distribution of [RefMet](https://www.metabolomicsworkbench.org) metabolites
+on a mass defect plot, showing the localization of different groups of
+metabolites.*

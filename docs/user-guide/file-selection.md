@@ -13,12 +13,24 @@ You may also specify an output directory for processed data and,
 optionally, an MS/MS fragment database (`.msp` or `.mgf`) so that MS2
 spectra can be viewed per-feature and exported/queried against GNPS(2).
 
+![MPACT file selection tab](../images/file-selection-tab.png)
+*MPACT file selection tab.*
+
 Peak tables are normally organized by individual injection/data file, but
 investigators usually care about biological/treatment groups. The sample
 list and metadata file link injection filenames → sample names → biological
 groups, which is what makes downstream group-level analysis possible.
 
+![File selection linking peak list, sample list, and metadata](../images/file-selection-linking.png)
+
 ## Peak table formats
+
+!!! note "Export screenshots may be out of date"
+    The export-dialog screenshots below are from the original 2022 user
+    guide. Progenesis QI, MZmine, and MS-DIAL have all released new
+    versions since then, so menu wording/layout may have shifted slightly
+    — the general export path (aligned/reviewed feature table → export
+    measurements/alignment results as CSV) should still apply.
 
 MPACT natively supports peak tables from **Progenesis QI**, **MZmine**,
 **MS-DIAL**, and **Bruker Metaboscape**. The format is auto-detected from
@@ -35,15 +47,21 @@ statistics.
 In the **Review Compounds** tab, select **File → Export Compound
 Measurements**, and export either raw or normalized abundance.
 
+![Progenesis feature list export parameters](../images/progenesis-export-params.png)
+
 ### Exporting a peak list from MZmine
 
 Generate an aligned feature list, then **Feature list methods → Export
 feature list → CSV (legacy MZmine 2)**.
 
+![MZmine feature list export parameters](../images/mzmine-export-params.png)
+
 ### Exporting a peak list from MS-DIAL
 
 **Export → Alignment result**, then export with the standard alignment
 export options.
+
+![MS-DIAL feature list export parameters](../images/msdial-export-params.png)
 
 ### Editing a peak table from an unsupported platform
 
@@ -57,6 +75,12 @@ abundance per injection makes up the table body. The easiest path is to
 reformat into Progenesis-style layout (by hand, or with a short R/Python
 script).
 
+![Example of a Progenesis format peak list](../images/progenesis-peaktable-example.png)
+*Example of a Progenesis format peak list. It is possible to import peak
+table data from currently unsupported platforms by manually editing them
+into Progenesis format, or with a script (R or Python work well for
+reformatting).*
+
 ## Sample list
 
 The sample list requires only an injection/file name column and the
@@ -64,11 +88,19 @@ corresponding sample name/code column (you can include more columns, but
 only those two are used). This can usually be copied straight out of your
 LC-MS sample queue.
 
+![Example sample list](../images/sample-list-example.png)
+*An example of an MPACT sample list linking file names in the peak list to
+sample names/codes.*
+
 ## Metadata file
 
 The metadata file requires only a sample name/code column and the
 corresponding biological/treatment group column (again, extra columns are
 fine).
+
+![Example metadata file](../images/metadata-file-example.png)
+*An example of an MPACT metadata file linking sample names/codes to
+biological/treatment groups.*
 
 ## MS/MS fragment database (optional)
 

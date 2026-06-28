@@ -15,6 +15,10 @@ CV of the median feature) falls relative to the theoretical maximum
 reproducibility, plus the number of features removed by each filtering
 step.
 
+![Data review tab](../images/data-review-tab.png)
+*MPACT data review tab within the main plots tab, showing a CV
+distribution plot.*
+
 ## CV Plot
 
 Shows the distribution of mean and median CV values across the dataset —
@@ -29,13 +33,23 @@ issues.
 - Marked multimodality (a sharp rise partway through the distribution) can
   indicate inconsistent detection across technical replicate sets.
 
+![CV distribution plot](../images/cv-plot.png)
+*MPACT CV distribution plot showing relatively good reproducibility with
+minimal skew and multimodality.*
+
 ## Feature Plot
 
 Plots every feature (m/z vs. retention time), coloured by which filtering
 stage removed it, if any. Features that passed all filters are shown in
 black as high-quality features.
 
+![Feature plot](../images/feature-plot.png)
+*MPACT feature plot showing features removed by various filtering stages.*
+
 ## Treemap
 
 Shows the number and percentage of features removed by each filtering
 step, as a treemap.
+
+![Treemap](../images/treemap.png)
+*MPACT treemap showing filtering rates.*

@@ -12,3 +12,9 @@ displays a samples (x-axis) × features (y-axis) heatmap.
 
 This makes it easy to spot groups of co-regulated features for
 prioritization. Colour scheme is configurable in the plot options dialog.
+
+![Heatmap](../images/heatmap.png)
+*MPACT heatmap grouping samples by overall metabolomic similarity (x-axis)
+and features by overall distribution similarity across samples (y-axis).
+Normalized abundance is denoted by cell colour, with lighter values
+corresponding to higher abundance.*
