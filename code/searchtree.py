@@ -186,7 +186,11 @@ class SearchTreePanel:
         self.view.setModel(self.proxy)
         self.view.setSortingEnabled(True)
         self.view.setRootIsDecorated(False)
-        self.view.setAlternatingRowColors(True)
+        # Not the original QTreeWidget's behaviour -- it never set this, and
+        # the app's underlying QPalette was never themed dark for the
+        # AlternateBase role (only the QSS stylesheets are dark), so Qt's
+        # default (light grey) alternate-row colour clashes badly here.
+        self.view.setAlternatingRowColors(False)
         self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.view.setUniformRowHeights(True)
         if old_stylesheet:
