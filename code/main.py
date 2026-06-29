@@ -38,6 +38,8 @@ from groupsets import GroupSet, GroupSetModel, build_query_dict
 from plotslots import PlotSlotRegistry
 from paramfields import save_checkbox_fields
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
+from biogroups import compute_biological_groups
+from dbsearch import search_npatlas
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
@@ -535,33 +537,12 @@ class MainWindow(QMainWindow):
         """
         Get biological groups on input of all input files, fills comboboxes with these.
         """
-        extractmetadata = pd.read_csv(self.extractmetadatafilename, sep=',', header=[0], index_col=None)
-        samplelist = pd.read_csv(self.samplelistfilename, sep=',', header=[0], index_col=None)
-    
         try:
-            combinedmetadata = extractmetadata.set_index('Sample_Code').join(samplelist.set_index('Sample_Code')) \
-                                                    .reset_index().set_index('Injection')
-        except Exception:
-            self.error('Data read failure: Check input files')
+            groups, unresolved = compute_biological_groups(
+                self.extractmetadatafilename, self.samplelistfilename, self.filename)
+        except ValueError as exc:
+            self.error(str(exc))
             return
-    
-        msdata = pd.read_csv(self.filename, sep=',', header=None, index_col=[0, 1, 2], low_memory=False)
-        groups = []
-        unresolved = []
-
-        for elem in msdata.iloc[2]:
-            try:
-                biolgroup = combinedmetadata.loc[elem, 'Biological_Group']
-                if isinstance(biolgroup, pd.Series):
-                    # A duplicate Injection entry in the joined metadata makes
-                    # .loc[] return a Series instead of a scalar -- take the
-                    # first rather than letting the `in`/append below raise
-                    # on an ambiguous Series truth value.
-                    biolgroup = biolgroup.iloc[0]
-                if biolgroup not in groups:
-                    groups.append(biolgroup)
-            except Exception:
-                unresolved.append(elem)
 
         if unresolved:
             # Report once, not once per row -- a dataset with many injections
@@ -609,33 +590,19 @@ class MainWindow(QMainWindow):
         Run a full compound database search. Filter the database matches within a specified mass window.
         Concatenate the hits and sort them by parts-per-million (ppm).
         """
-        self.hitdb = {}
-        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-        iondict['hits'] = ''
-        msdata = cached_read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=None).iloc[:, :3]
-    
-        for _, mrow in msdata.iterrows():
-            # Iterates over iondict, filters DB matches within window.
-            # Repeats for adducts, uses length of concat DF for feature hits
-            mass = mrow['m/z']
-            ppmwindow = self.analysis_paramsgui.ppmthresh
-            hits_h = self.atlas[abs(1000000 * (self.atlas['compound_m_plus_h'] - mass) / self.atlas['compound_m_plus_h']) < ppmwindow]
-            hits_h['ppm'] = abs(1000000 * (hits_h['compound_m_plus_h'] - mass) / hits_h['compound_m_plus_h'])
-            hits_na = self.atlas[abs(1000000 * (self.atlas['compound_m_plus_na'] - mass) / self.atlas['compound_m_plus_na']) < ppmwindow]
-            hits_na['ppm'] = abs(1000000 * (hits_na['compound_m_plus_na'] - mass) / hits_na['compound_m_plus_na'])
-            hits = pd.concat([hits_h, hits_na])
-            hits = hits.sort_values(by=['ppm'])
-            self.hitdb[mrow['Compound']] = hits
-            iondict.loc[mrow['Compound'], 'hits'] = hits.shape[0]
-    
-        iondict.to_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', header=True, index=True)
+        self.hitdb, _ = search_npatlas(
+            self.analysis_paramsgui.outputdir,
+            self.analysis_paramsgui.filename.stem,
+            self.atlas,
+            self.analysis_paramsgui.ppmthresh,
+        )
 
         
 
 
     def fillfttree(self):
         # Fill feature tree with database hits
-        iondict = pd.read_csv(
+        iondict = cached_read_csv(
             self.analysis_paramsgui.outputdir / 'iondict.csv',
             sep=',',
             header=[0],
