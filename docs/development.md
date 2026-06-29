@@ -2,7 +2,7 @@
 
 This page is for people contributing to MPACT itself, not end users. For
 the authoritative, most up-to-date version of these notes (kept alongside
-the code), see [`CLAUDE.md`](https://github.com/BalunasLab/mpact/blob/main/CLAUDE.md)
+the code), see [`devnotes.md`](https://github.com/BalunasLab/mpact/blob/main/devnotes.md)
 in the repo root.
 
 ## Architecture
