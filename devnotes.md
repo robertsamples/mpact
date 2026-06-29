@@ -1,8 +1,7 @@
-# CLAUDE.md — MPACT
+# devnotes.md — MPACT
 
-Guidance for Claude Code (and humans) working in this repo. MPACT is a PyQt5
-desktop tool for mass-spectrometry / natural-products data analysis. Code lives
-in `code/`.
+MPACT is a PyQt5 desktop tool for mass-spectrometry / natural-products data analysis. 
+Code runs in ./code.
 
 ## Running the app
 
@@ -71,7 +70,7 @@ Windows build surfaced platform-specific issues that will very likely recur:
 - Given all of the above is unverified, treat any of it as a starting
   hypothesis to confirm on real Linux/Mac hardware, not a finished plan.
 
-## ⚠️ NumPy 2.x / Anaconda dependency hazard (read before touching deps)
+##  NumPy 2.x / Anaconda dependency hazard (read before touching deps)
 
 This runs in a conda env whose pandas/matplotlib/scipy are compiled against
 **NumPy 1.x**. A bare `pip install <pkg>` can upgrade NumPy to 2.x, which breaks
