@@ -69,7 +69,10 @@ Check if low_memory=False increases ram usage for average grps?
 -add bypass for plots based on checkmark. possibly use if check: ... else: button.hide() then pass
 
 - distribution of CVs on bottom of cvplt?
-- add pca option and allow visualization of key features on multivar plt?
+- allow visualization of key features (loadings/biplot) on multivar plt
+    (PCA itself already exists -- plot_PCA/goto_pca/checkbox field -- this is
+    specifically about showing which original features drive each component,
+    which plot_PCA doesn't do yet)
 
 #TODO#
 - in source spectra viewer in spectrum details tab plot with preexisting in source fragment deconvolution algoirthm
