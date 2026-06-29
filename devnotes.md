@@ -283,28 +283,38 @@ only handles the combo boxes, axes, and pick events.
 
 ## Dendrogram purity coloring (`plotting.plot_dendrogram`, `clusterpurity.py`)
 
-The dendrogram tab has a combo-box switcher (same runtime-widget-substitution
-pattern as `plot_ordination`'s method/view bar) between two views, both
-purity-colored to make a QC judgment visible at a glance rather than read off
-leaf labels one at a time:
+The dendrogram tab has two combo-box switchers (same runtime-widget-
+substitution pattern as `plot_ordination`'s method/view bar):
 
-- **Technical Replicates** (default — matches the tab's previous, only,
-  behaviour): every Injection is its own leaf. A branch is colored green
-  wherever *all* of one Sample's injections merge together before merging
-  with anything else (i.e. that Sample is a monophyletic clade) — a
-  tight green clump means that sample's replicates agree; black means they
-  don't.
-- **Biological Replicates**: technical replicates are averaged first (same
-  `ordination.load_ordination_matrix(..., collapse_replicates=True)` used by
-  the multivariate tab's checkbox), so leaves are Samples, and purity is
-  judged against Biolgroup instead — green means a whole biological group's
-  samples cluster together before meeting another group, i.e. the groups are
-  separable; black means they're not.
+- **View** — which leaves to cluster:
+  - **Technical Replicates** (default — matches the tab's original
+    behaviour): every Injection is its own leaf, purity judged against
+    Sample membership — a tight monophyletic clump means that sample's
+    replicates agree.
+  - **Biological Replicates**: technical replicates are averaged first
+    (same `ordination.load_ordination_matrix(..., collapse_replicates=True)`
+    used by the multivariate tab's checkbox), so leaves are Samples, purity
+    judged against Biolgroup instead — a monophyletic clade means a whole
+    biological group's samples cluster together before meeting another
+    group, i.e. the groups are separable.
+- **Color** — how to render purity:
+  - **Purity** (default): green wherever a branch's leaves are entirely one
+    group (correctly clustered), red wherever a branch mixes more than one
+    group (polyphyletic) — a QC judgment visible at a glance rather than
+    read off leaf labels one at a time. The plot title reports
+    `n_pure/n_total` (e.g. "7/9 samples' replicates clustered together",
+    "3/3 biological groups separable") via `clusterpurity.purity_summary()`.
+  - **None**: plain black, no title — deliberately reproduces the tab's
+    appearance from *before* purity coloring existed (there was no title at
+    all previously), for anyone who just wants the dendrogram shape without
+    the QC overlay. Implemented as `link_color_func=None` with
+    `color_threshold=0` still set (dropping `color_threshold=0` here was a
+    real regression caught while testing: without it, scipy falls back to
+    its own default 0.7-of-max-height threshold and a multi-color palette
+    instead of plain black).
 
-The plot title reports `n_pure/n_total` (e.g. "7/9 samples' replicates
-clustered together", "3/3 biological groups separable") using
-`clusterpurity.purity_summary()` — the same Qt-free linkage-traversal logic
-that drives the coloring, unit-tested in `tests/test_clusterpurity.py`.
+Both views' purity math is the same Qt-free linkage-traversal logic in
+`clusterpurity.py`, unit-tested in `tests/test_clusterpurity.py`.
 
 - **Purity is a strict, whole-group check, not "any uniform subset"**: a
   label only counts as pure if *every* leaf carrying it ends up in one clade

@@ -799,35 +799,46 @@ class plot_fc3d(ui_plot):
 
 class plot_dendrogram(ui_plot):
     """
-    Dendrogram generation, with a combo-box switcher (same pattern as
-    plot_ordination's method/view bar) between two purity-colored views:
+    Dendrogram generation, with combo-box switchers (same pattern as
+    plot_ordination's method/view bar) for which leaves to cluster and how
+    to color the branches:
 
-    - "Technical Replicates": every injection is its own leaf, colored
-      green wherever an entire Sample's injections cluster together before
-      merging with anything else -- a quick visual QC for whether technical
-      replicates are tight.
+    Views:
+    - "Technical Replicates": every injection is its own leaf -- branches
+      are judged for purity against Sample membership, a quick visual QC
+      for whether technical replicates are tight.
     - "Biological Replicates": injections are first averaged per Sample
       (same collapsing logic as the ordination tab's "Collapse Technical
       Replicates" checkbox, via ordination.load_ordination_matrix), then
-      leaves are colored green wherever an entire Biolgroup's samples
-      cluster together -- a quick visual QC for whether biological groups
-      are separable at all, independent of technical noise.
+      leaves are Samples, judged for purity against Biolgroup -- a quick
+      visual QC for whether biological groups are separable at all,
+      independent of technical noise.
 
-    Either view can be regular or bootstrapped (PvClust), depending on
-    parent.analysis_paramsgui.bootstrap, same as before this rework. The
-    purity-coloring math lives in the Qt-free clusterpurity.py.
+    Coloring:
+    - "Purity": green wherever a branch's leaves are entirely one group
+      (correctly clustered), red wherever a branch mixes more than one
+      group (polyphyletic).
+    - "None": plain black dendrogram, no purity coloring or title -- the
+      tab's original (pre-purity-coloring) appearance.
+
+    Either view/coloring combination can be regular or bootstrapped
+    (PvClust), depending on parent.analysis_paramsgui.bootstrap, same as
+    before this rework. The purity-coloring math lives in the Qt-free
+    clusterpurity.py.
     """
 
     VIEWS = ('Technical Replicates', 'Biological Replicates')
+    COLOR_MODES = ('Purity', 'None')
 
     def __init__(self, parent, currplt, frame, file, filtereddfs, groupsets):
         ui_plot.__init__(self, parent, currplt, frame)
         self.parent = parent
         self.currplt = currplt
-        # Default matches the plot's previous (injection-level) behaviour
-        # exactly, so existing sessions see no change until they explicitly
-        # switch to the biological-replicate view.
+        # Defaults match the plot's previous (injection-level, uncolored)
+        # behaviour exactly, so existing sessions see no change until they
+        # explicitly switch the new controls.
         self.view = 'Technical Replicates'
+        self.color_mode = 'Purity'
         self._build_switcher_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
 
@@ -844,13 +855,25 @@ class plot_dendrogram(ui_plot):
         view_combo.setCurrentText(self.view)
         view_combo.currentTextChanged.connect(self._on_view_changed)
         layout.addWidget(view_combo)
+
+        layout.addWidget(QtWidgets.QLabel('Color:'))
+        color_combo = QtWidgets.QComboBox()
+        color_combo.addItems(self.COLOR_MODES)
+        color_combo.setCurrentText(self.color_mode)
+        color_combo.currentTextChanged.connect(self._on_color_mode_changed)
+        layout.addWidget(color_combo)
         layout.addStretch()
 
         self.view_combo = view_combo
+        self.color_combo = color_combo
         parent.pltlayout[currplt].insertWidget(0, bar)
 
     def _on_view_changed(self, view):
         self.view = view
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_color_mode_changed(self, color_mode):
+        self.color_mode = color_mode
         self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
 
     def plot(self, parent, file, filtereddfs, groupsets):
@@ -895,17 +918,28 @@ class plot_dendrogram(ui_plot):
         if parent.analysis_paramsgui.bootstrap:
             # bootstrap dendrogram
             pv = PvClust(data_for_pvclust, method="ward", metric="euclidean", nboot=1000, parallel=True)
-            link_color_func = clusterpurity.purity_link_color_func(pv.linkage_matrix, leaf_labels)
-            dend = pv.plot(parent.ax[self.currplt], labels=textlabels, link_color_func=link_color_func)
             Z = pv.linkage_matrix
         else:
             # regular dendrogram
             Z = shc.linkage(data_for_linkage, method='ward')
-            link_color_func = clusterpurity.purity_link_color_func(Z, leaf_labels)
-            dend = shc.dendrogram(Z, ax=parent.ax[self.currplt], leaf_rotation=90, above_threshold_color='black', link_color_func=link_color_func, labels=textlabels)  # default leaf label size 16
 
-        n_pure, n_total = clusterpurity.purity_summary(Z, leaf_labels)
-        parent.ax[self.currplt].set_title(f'{n_pure}/{n_total} {purity_noun}', fontsize=10)
+        if self.color_mode == 'Purity':
+            # Green = monophyletic (correctly clustered); red = polyphyletic
+            # (mixes more than one group).
+            link_color_func = clusterpurity.purity_link_color_func(Z, leaf_labels, true_color='green', false_color='red')
+        else:
+            link_color_func = None  # plain black dendrogram, scipy's own default
+
+        if parent.analysis_paramsgui.bootstrap:
+            dend = pv.plot(parent.ax[self.currplt], labels=textlabels, link_color_func=link_color_func)
+        else:
+            dend = shc.dendrogram(Z, ax=parent.ax[self.currplt], leaf_rotation=90, color_threshold=0, above_threshold_color='black', link_color_func=link_color_func, labels=textlabels)  # default leaf label size 16
+
+        if self.color_mode == 'Purity':
+            n_pure, n_total = clusterpurity.purity_summary(Z, leaf_labels)
+            parent.ax[self.currplt].set_title(f'{n_pure}/{n_total} {purity_noun}', fontsize=10)
+        # "None" coloring intentionally leaves no title -- this tab had none
+        # before purity coloring was added.
 
         parent.fig[self.currplt].subplots_adjust(
             left=0.1, right=0.95, bottom=0.35, top=0.9, hspace=0.2, wspace=0.2)
