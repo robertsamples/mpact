@@ -73,31 +73,24 @@ Check if low_memory=False increases ram usage for average grps?
 - add pca option and allow visualization of key features on multivar plt?
 
 #TODO#
-#Easy/high priority
-- in source spectra
+- in source spectra viewer in tab plot
 - do overall data quality score, AUC
 - standardize method and class names
 - database management, options
 - fix up analysisinfo file output
 
-#Medium priority
 - mzmine msp file import
 - add other ordination options
 - add custom keyword arguments for each plot to make calling them easier
-- add more conditionals so if one plot fails it doesn't kill everything else
 - add runcheck before searching when switching to search tab
 - Figure out way to have only active plot be updated and then to update others
     when plot is switched
-- change treewidget in search tab to treeview for better search, add filter options
 - make it so groups can be reordered
-- make it so iondict and msdata are saved as a parent object so they dont need to
-    be reopened each time a heatmap feature is scrolled. This may actually not
-    be a good idea depending on ram demands
+- consider if indexing and feature highly functions in plot options have any easy wins for optimization or disk use. (prob not)
 - make goto buttons just one class and lambda an index for the stacked widgets
     when connecting!
 
-#low priority/long term
-- Switch to MVC format for groupsets
+
 - maybe have a comparison mode for many different strains with and without elicitor
 - specificity/sensitivity plot
 - other statistical models
