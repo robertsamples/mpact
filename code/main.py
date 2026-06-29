@@ -237,7 +237,7 @@ class MainWindow(QMainWindow):
         #self.show() # makes window reappear, acts like normal window now (on top now but can be underneath if you raise another window)
         
         self.ui.setupUi(self)
-        self.ui.label_credits.setText('v1.00 r24.11.17')
+        self.ui.label_credits.setText('v1.00.01 r26.06.29')
                 
         #initialize other dialog windows
         self.dialog = dialog()
