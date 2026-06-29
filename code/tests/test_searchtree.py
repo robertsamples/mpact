@@ -173,6 +173,27 @@ def test_panel_selected_compound_none_when_nothing_selected(qapp):
     assert panel.selected_compound() is None
 
 
+def test_filter_panel_collapsed_by_default(qapp):
+    host, layout, tree_widget = make_host_with_tree_widget()
+    panel = SearchTreePanel(tree_widget)
+    assert panel.filter_panel.isVisible() is False
+    assert not panel.toggle_button.isChecked()
+
+
+def test_toggle_button_shows_and_hides_the_filter_panel(qapp):
+    host, layout, tree_widget = make_host_with_tree_widget()
+    panel = SearchTreePanel(tree_widget)
+    host.show()  # isVisible() reflects the whole ancestor chain, not just
+    # the widget's own explicit flag -- without showing host, filter_panel
+    # would never be considered "visible" regardless of setVisible(True).
+
+    panel.toggle_button.setChecked(True)
+    assert panel.filter_panel.isVisible() is True
+
+    panel.toggle_button.setChecked(False)
+    assert panel.filter_panel.isVisible() is False
+
+
 def test_panel_category_filter_options_repopulate_on_set_rows(qapp):
     host, layout, tree_widget = make_host_with_tree_widget()
     panel = SearchTreePanel(tree_widget)
