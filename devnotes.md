@@ -107,8 +107,10 @@ that way. Required deps (gate startup): `epam.indigo`→`indigo`, `UpSetPlot`→
   (shared save/restore schema for simple `analysis_parameters` checkbox
   fields), `biogroups.py` (`getgroups()`'s metadata-join/group-derivation
   core), `dbsearch.py` (`fulldbsearch()`'s NPAtlas ppm-window matching
-  core). Each corresponding `MainWindow` method is now a thin wrapper:
-  call the module function, then apply the result to widgets/`self`.
+  core), `ordination.py` (PCA/NMDS/PLS-DA + technical-replicate collapsing
+  + top-N loadings selection for the multivariate plot tab). Each
+  corresponding `MainWindow` method is now a thin wrapper: call the module
+  function, then apply the result to widgets/`self`.
 - **Runtime widget substitution into a Designer placeholder** is an
   established pattern here, not a one-off — `plotting.py` does it for every
   matplotlib canvas (inserted into a Designer-created `QFrame`), and
@@ -159,7 +161,7 @@ python -m pytest code/tests -q
 ```
 
 Covers `filter`, `stats`, `importdependencies`, `translators`, `groupsets`,
-`searchtree`. Add tests here for any new Qt-free logic.
+`searchtree`, `ordination`. Add tests here for any new Qt-free logic.
 
 `conftest.py` sets `QT_QPA_PLATFORM=offscreen` and provides a session-scoped
 `qapp` fixture: PyQt5 widgets/models/signals *can* be exercised headlessly via
@@ -187,6 +189,67 @@ ONLY as the unpickle target for old `.mpct` files (pickled by qualified name
 on load. UI uses `QListWidget` (generated, off-limits), so this is not a true
 `QAbstractListModel`/`QListView` setup — the "view" side is the existing
 hand-written widget-sync code in `ui_functions.py`, kept thin.
+
+## Multivariate ordination plot (`plotting.plot_ordination`, `ordination.py`)
+
+What used to be called "PCA" (`plot_PCA`, `checkBox_pca`/`btn_pca`'s old
+tooltip) actually only ran NMDS, with a PCA rotation applied to the NMDS
+coordinates purely to orient the axes — not a second ordination of the
+original features. `plot_ordination` now genuinely supports PCA, NMDS, and
+PLS-DA, switchable via a combo-box bar inserted above the plot canvas (same
+runtime widget-substitution pattern as `searchtree.py`'s filter bar — see
+above), plus a Scores/Loadings view toggle. The math lives in the Qt-free
+`ordination.py` (unit-tested in `tests/test_ordination.py`); `plotting.py`
+only handles the combo boxes, axes, and pick events.
+
+- **Save-file compatibility preserved on purpose**: `analysis_params.PCA`
+  and `checkBox_pca`'s objectName are unchanged (still pickled into `.mpct`
+  saves) — only the visible checkbox text/tooltip changed (set at runtime in
+  `MainWindow.__init__`, same mechanism as `label_credits.setText`). Only
+  the hand-written class name (`plot_PCA` → `plot_ordination`) changed,
+  since that's never pickled.
+- **"Collapse Technical Replicates" used to be dead** (`plotting.py` had
+  `parent.collapsereps = False#parent.dialog.ui.checkBox_collapsereps.isChecked()`
+  — hardcoded off, the real read commented out). Now wired for real via
+  `ordination.load_ordination_matrix(..., collapse_replicates=...)`. The
+  collapse logic itself (average technical replicates/Injections, keep
+  biological replicates/Samples distinct) was ported verbatim from the
+  original rather than rewritten — its header-relabeling-via-CSV-round-trip
+  is easy to get subtly wrong by inspection, so it's verified empirically
+  instead (`test_ordination.py`'s synthetic-replicate-structure test, cross-
+  checked against real example data with a scratch script during
+  development).
+- **Loadings view and high-dimensional data**: thousands of features can't
+  all be drawn legibly, so only the top-25 by loading-vector magnitude are
+  shown by default (`ordination.top_loadings()`). Whichever feature is
+  currently highlighted elsewhere in the app (`MainWindow.pickedfeature`) is
+  always included regardless of magnitude — `plot_ordination.highlight_loading()`,
+  called from `MainWindow._refresh_highlight()`, follows the same
+  pre-create-an-empty-artist/update-via-`set_data()` convention every other
+  plot's highlight marker already uses. This is a *feature* highlight
+  (Loadings view), a different concept from the Scores view's existing
+  *sample* highlight (`parent.pickedsample`, set by clicking a sample point)
+  — the two views show different kinds of points and were never the same
+  selection concept.
+- **NMDS has no linear feature loadings** (it's a rank-based embedding, not
+  a linear projection) — its Loadings view uses `ordination.nmds_loading_proxy()`,
+  per-feature correlation with each NMDS axis (the standard ecology "vector
+  fitting"/`envfit` approach), not real loadings. Its percent-explained axis
+  label is also captioned distinctly from PCA/PLS-DA's ("% of embedding
+  variance" vs. real original-feature-space variance), since the two
+  quantities aren't comparable.
+- **PLS-DA's explained-variance gotcha**: `sklearn.cross_decomposition.PLSRegression`
+  defaults to `scale=True` (standardizes X internally), which silently
+  produced explained-variance ratios off by ~6 orders of magnitude when
+  compared against unscaled total variance — caught only by running against
+  real data, not by inspection. Fixed with `scale=False`, matching PCA's
+  plain-centered (not standardized) treatment.
+- **OPLS-DA intentionally not implemented**: no native scikit-learn support;
+  the alternatives (the unmaintained `pyopls` package, or a from-scratch
+  orthogonal-signal-correction implementation) are both riskier than
+  shipping PCA/NMDS/PLS-DA without a reference dataset to validate against.
+  Logged here as the next ordination method to add if ever revisited, not
+  started.
 
 ## Conventions
 

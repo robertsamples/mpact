@@ -9,6 +9,7 @@ import pandas as pd
 import pickle
 
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
+import ordination
 
 import matplotlib
 #matplotlib.style.use('ggplot')
@@ -35,9 +36,6 @@ from pathlib import Path
 
 import scipy.cluster.hierarchy as shc
 from sklearn.preprocessing import normalize
-from sklearn import manifold
-from sklearn.metrics import pairwise_distances
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from matplotlib.patches import Ellipse
 from filter import listfilter
@@ -833,152 +831,233 @@ class plot_dendrogram(ui_plot):
             left=0.1, right=0.95, bottom=0.35, top=0.9, hspace=0.2, wspace=0.2)
         parent.canvas[self.currplt].draw()
 
-class plot_PCA(ui_plot):
-            #plots NMDS data
-            # should include opion to allow user specified pca colors
-            # need to fix selection of samples on PCA plot
-            # should add PCA vs NMDS option
+_ORDINATION_SWITCHER_STYLE = """
+QWidget {
+    background-color: rgba(70,70,70,25);
+}
+QComboBox {
+    background-color: rgb(50,50,50);
+    color: rgb(200,200,200);
+    border: 1px solid rgb(70,70,70);
+    border-radius: 2px;
+    padding: 2px;
+}
+QLabel {
+    color: rgb(200,200,200);
+    background: transparent;
+}
+"""
+
+
+class plot_ordination(ui_plot):
+    """Multivariate ordination plot: PCA, NMDS, or PLS-DA, with a
+    scores-vs-loadings view toggle.
+
+    A combo-box switcher bar (built once in ``__init__``, inserted above the
+    canvas the same way ``SearchTreePanel``'s filter bar is substituted into
+    a Designer placeholder -- see searchtree.py) lets the user pick the
+    ordination method and the scores/loadings view; both redraw onto the
+    same axes via ``self.plot(...)`` rather than rebuilding the canvas.
+
+    The actual math lives in the Qt-free ``ordination.py`` (PCA/NMDS/PLS-DA,
+    technical-replicate collapsing, top-N loadings selection); this class is
+    just the Qt plumbing and rendering on top of it.
+    """
+
+    METHODS = ('NMDS', 'PCA', 'PLS-DA')
+    VIEWS = ('Scores', 'Loadings')
+
     def __init__(self, parent, currplt, frame, file, filtereddfs, groupsets):
         ui_plot.__init__(self, parent, currplt, frame)
         self.parent = parent
         self.currplt = currplt
+        # Defaults match the plot's previous (NMDS-only, scores-only)
+        # behaviour exactly, so existing sessions see no change until they
+        # explicitly switch the new controls.
+        self.method = 'NMDS'
+        self.view = 'Scores'
+        self.loadings_df = None
+        self._build_switcher_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
 
+    def _build_switcher_bar(self, parent, currplt):
+        bar = QtWidgets.QWidget()
+        bar.setStyleSheet(_ORDINATION_SWITCHER_STYLE)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+
+        layout.addWidget(QtWidgets.QLabel('Method:'))
+        method_combo = QtWidgets.QComboBox()
+        method_combo.addItems(self.METHODS)
+        method_combo.setCurrentText(self.method)
+        method_combo.currentTextChanged.connect(self._on_method_changed)
+        layout.addWidget(method_combo)
+
+        layout.addWidget(QtWidgets.QLabel('View:'))
+        view_combo = QtWidgets.QComboBox()
+        view_combo.addItems(self.VIEWS)
+        view_combo.setCurrentText(self.view)
+        view_combo.currentTextChanged.connect(self._on_view_changed)
+        layout.addWidget(view_combo)
+        layout.addStretch()
+
+        self.method_combo = method_combo
+        self.view_combo = view_combo
+        parent.pltlayout[currplt].insertWidget(0, bar)
+
+    def _on_method_changed(self, method):
+        self.method = method
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_view_changed(self, view):
+        self.view = view
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
     def plot(self, parent, file, filtereddfs, groupsets):
-        """Plot principal component analysis (PCA) or NMDS data.
-        
+        """(Re)draw the ordination plot for the current method/view.
+
         Args:
-            parent (QWidget): Parent widget.
-            currplt (int): Current plot number.
-            frame (QFrame): Frame to hold the plot.
-            file (str): Path to the file containing the PCA data.
-            filtereddfs (list): List of filtered data.
-            groupsets (list): List of group sets.
-        
-        Attributes:
-            highlightcol (tuple): Tuple containing RGBA values used for highlighting.
-            event (int): Identifier for the pick event used to select points on the plot.
-        
-        Methods:
-            plot(self, parent, file, filtereddfs, groupsets): Plot the PCA data.
-            plot_point_cov(self, points, nstd=2, ax=None, **kwargs): Generate an ellipse for the confidence interval.
-            lighten_color(self, color, amount=0.5): Lighten a given color by a given amount.
-            plot_cov_ellipse(self, cov, pos, nstd=2, ax=None, **kwargs): Generate an optimized ellipse for the confidence interval.
+            parent (QWidget): Parent widget (MainWindow).
+            file (str): Path to the ``_filtered.csv`` peak table.
+            filtereddfs, groupsets: unused here (kept for the shared
+                ``_create_or_reset``/``reset`` call signature every plot
+                class follows).
         """
         parent = self.parent
-        parent.collapsereps = False#parent.dialog.ui.checkBox_collapsereps.isChecked()
-        
-        if parent.collapsereps:
-            # Average techreps if replicate collapse is selected
-            msdata = pd.read_csv(file, sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-            try:
-                msdata = msdata.stack([0, 1, 2], future_stack=True)
-            except TypeError:
-                msdata = msdata.stack([0, 1, 2])            
-            msdata = msdata.groupby(level=[0, 1, 2, 3, 4]).mean().unstack(level=[-1, -2])
-            test2 = msdata.columns.to_list()
-            msdata = msdata.reset_index()
-            header = [('','','Compound'), ('','','m/z'), ('','','Retention time (min)')]
-            for elem in test2:
-                header.append((elem[1], '', elem[0]))
-            msdata.columns = pd.MultiIndex.from_tuples(header)
-            msdata.to_csv('averagepca.csv', header=True, index=False)
+        self._last_file = file
+        self._last_filtereddfs = filtereddfs
+        self._last_groupsets = groupsets
 
-            msdata_header = pd.read_csv('averagepca.csv', sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
-            pcadf = pd.read_csv('averagepca.csv', sep=',', header=[2], index_col=[0]).drop(['m/z', 'Retention time (min)'], axis=1).transpose().astype(float).reset_index().rename(columns={'index': 'File'})
-        else:
-            msdata_header = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
-            pcadf = pd.read_csv(file, sep=',', header=[2], index_col=[0]).drop(['m/z', 'Retention time (min)'], axis=1).transpose().astype(float).reset_index().rename(columns={'index': 'File'})
+        collapse_replicates = parent.dialog.ui.checkBox_collapsereps.isChecked()
+        raw_header = cached_read_csv(
+            parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'),
+            sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
+        x, biolgroup = ordination.load_ordination_matrix(file, raw_header.copy(), collapse_replicates)
 
-        components = len(msdata_header.index)
-        if components > 10:
-            components = 10
-        msdata_header.columns = ['Biolgroup', 'Sample', 'Injection']
-        msdata_header = msdata_header.set_index('Injection')
+        n_components = max(2, min(len(x) - 1, 10))
+
         colors = ['red', 'blue', 'black', 'grey', 'purple', 'orange', 'green', 'yellow', 'lime', 'plum', 'teal', 'olivedrab', 'sienna', 'maroon', 'navy', 'lightcoral', 'darkgoldenrod', 'seagreen', 'lightseagreen', 'aqua', 'lightsteelblue', 'slateblue', 'blueviolet', 'plum', 'burlywood', 'salmon', 'aquamarine', 'magenta', 'tan']
         colorpos, biolgroupmap = 0, {}
-        for elem in msdata_header['Biolgroup']:
+        for elem in biolgroup:
             if elem not in biolgroupmap and elem != parent.analysis_paramsgui.blnkgrp: ###### delete blank clause OR CHANGE TO THE BLNKFILTER OPTION
                 biolgroupmap[elem] = colors[colorpos]
                 colorpos += 1
-                
-        features = pcadf.columns.values[1:]
-        x = pcadf[features].values
-        y = pcadf[['File']].values
-        x -= x.mean()
-        similarities = pairwise_distances(x, metric='braycurtis')
-        
-        mds = manifold.MDS(n_components=components, max_iter=3000, eps=1e-9, random_state=1,
-                           dissimilarity="precomputed", n_jobs=1)
-        pos = mds.fit(similarities).embedding_
-        
-        nmds = manifold.MDS(n_components=components, metric=False, max_iter=3000, eps=1e-12,
-                            dissimilarity="precomputed", random_state=1, n_jobs=1,
-                            n_init=1)
-        npos = nmds.fit_transform(similarities, init=pos)
-        stress_value = nmds.stress_
-        print("NMDS stress: " +str(stress_value))
-        
-        pca = PCA(n_components=components)
-        nmdspc = pca.fit_transform(npos)
-        expvar = pca.explained_variance_ratio_
-        pcadftest = pd.DataFrame(data=nmdspc)
-        
-        ncomplist = list(range(components))
-        nmdspc = pd.DataFrame(data=nmdspc, columns=ncomplist)
-        nmdspc['File'] = pcadf['File']
-        nmdspc['Biolgroup'] = ''
-        for i, elem in enumerate(nmdspc.iloc[:, components]):
-            nmdspc.iloc[i, components + 1] = msdata_header.loc[elem, 'Biolgroup']
-        principalDf = nmdspc.set_index('File')
-                
+
+        if self.method == 'PCA':
+            scores, loadings, expvar = ordination.run_pca(x, n_components)
+            axis_labels = [f'PC{i + 1} ({100 * expvar[i]:.1f}%)' for i in range(2)]
+        elif self.method == 'PLS-DA':
+            scores, loadings, expvar = ordination.run_plsda(x, biolgroup, n_components)
+            axis_labels = [f'PLS{i + 1} ({100 * expvar[i]:.1f}%)' for i in range(2)]
+        else:
+            scores, expvar, stress = ordination.run_nmds(x, n_components)
+            loadings = ordination.nmds_loading_proxy(x, scores)
+            print("NMDS stress: " + str(stress))
+            # Labeled distinctly from PCA/PLS-DA's: this is the variance of
+            # the embedded 2D NMDS coordinates, not of the original feature
+            # space (see ordination.run_nmds's docstring).
+            axis_labels = [f'NMDS{i + 1} ({100 * expvar[i]:.1f}% of embedding variance)' for i in range(2)]
+
+        self.loadings_df = loadings
+        principalDf = scores.copy()
+        principalDf['Biolgroup'] = biolgroup
+
+        if self.view == 'Loadings':
+            self._plot_loadings(parent, loadings, axis_labels)
+        else:
+            self._plot_scores(parent, principalDf, biolgroupmap, axis_labels)
+
+        parent.fig[self.currplt].subplots_adjust(left=.1, right=.9, bottom=0.1, top=0.9, hspace=0.2, wspace=0.2)
+        parent.canvas[self.currplt].draw()
+
+    def _plot_scores(self, parent, principalDf, biolgroupmap, axis_labels):
         for elem in biolgroupmap:
             scatterframe = principalDf[principalDf['Biolgroup'] == elem]
-            points = scatterframe.iloc[:,[0,1]].to_numpy()
+            points = scatterframe.iloc[:, [0, 1]].to_numpy()
             if np.shape(points)[0] > 2:
                 self.plot_point_cov(points, nstd=2, ax=parent.ax[self.currplt], alpha=0.5, color=self.lighten_color(biolgroupmap[elem], 0.3))
-            parent.ax[self.currplt].scatter(scatterframe.iloc[:,0], scatterframe.iloc[:,1], color=biolgroupmap[elem], marker='o', s=30, label=str(elem), picker=True)
-        
+            parent.ax[self.currplt].scatter(scatterframe.iloc[:, 0], scatterframe.iloc[:, 1], color=biolgroupmap[elem], marker='o', s=30, label=str(elem), picker=True)
+
         parent.highlight[self.currplt], = parent.ax[self.currplt].plot([], [], 'o', markersize=12, color='yellow')
-        parent.ax[self.currplt].set_xlabel('NMDS1', **self.fcsfont) # (' + str(round(100*expvar[0], 2)) + '%)'
-        parent.ax[self.currplt].set_ylabel('NMDS2', **self.fcsfont) #(' + str(round(100*expvar[1], 2)) + '%)'
-        
-        #following two lines put a hard limit on the axis tick distance
-        #parent.ax[self.currplt].xaxis.set_major_locator(ticker.MultipleLocator(0.1))
-        #parent.ax[self.currplt].yaxis.set_major_locator(ticker.MultipleLocator(0.1))
-        
+        parent.ax[self.currplt].set_xlabel(axis_labels[0], **self.fcsfont)
+        parent.ax[self.currplt].set_ylabel(axis_labels[1], **self.fcsfont)
+
         self.highlightcol = (0, 0, 0, 0)
         parent.pickedsample = pd.DataFrame(0, index=['empty'], columns=['empty'])
-        
-        def picksample(event): # fix this
+
+        def picksample(event):
             if _is_duplicate_pick(parent, event):
                 return
             ind = event.ind
-            coord = event.artist.get_offsets()[ind,:]
-            newsample = principalDf.loc[principalDf.iloc[:,0] == coord[0,0], :].loc[principalDf.iloc[:,1] == coord[0,1], :].reset_index()
+            coord = event.artist.get_offsets()[ind, :]
+            newsample = principalDf.loc[principalDf.iloc[:, 0] == coord[0, 0], :].loc[principalDf.iloc[:, 1] == coord[0, 1], :].reset_index()
             if newsample.empty:
                 return
 
-            if newsample.iloc[0,0] == parent.pickedsample.iloc[0,0] and self.highlightcol != (0, 0, 0, 0):
+            if newsample.iloc[0, 0] == parent.pickedsample.iloc[0, 0] and self.highlightcol != (0, 0, 0, 0):
                 self.highlightcol = (0, 0, 0, 0)
             else:
                 self.highlightcol = 'yellow'
-            
+
             parent.pickedsample = newsample
-            parent.ui.lbl_injname.setText('Injection/Sample: ' + str(parent.pickedsample.iloc[0,0]))
-            parent.highlight[self.currplt].set_data(coord[0,0],coord[0,1])
+            parent.ui.lbl_injname.setText('Injection/Sample: ' + str(parent.pickedsample.iloc[0, 0]))
+            parent.highlight[self.currplt].set_data(coord[0, 0], coord[0, 1])
             parent.highlight[self.currplt].set_color(self.highlightcol)
             parent.canvas[self.currplt].draw_idle()
-        
+
         self.event = parent.canvas[self.currplt].figure.canvas.mpl_connect('pick_event', picksample)
-        parent.fig[self.currplt].subplots_adjust(left=.1, right=.9, bottom=0.1, top=0.9, hspace=0.2, wspace=0.2)
-        #x0,x1 = parent.ax[self.currplt].get_xlim()
-        #0,y1 = parent.ax[self.currplt].get_ylim()
-        #parent.ax[self.currplt].set_aspect(abs(x1-x0)/abs(y1-y0))
-        #parent.ax[self.currplt].set_aspect('equal')
         parent.ax[self.currplt].legend()
-        parent.canvas[self.currplt].draw()
-    
+
+    def _plot_loadings(self, parent, loadings, axis_labels):
+        """Loadings (biplot-style) view: origin-anchored arrows for the
+        top-N features by vector magnitude, plus -- regardless of
+        magnitude -- whichever feature is currently highlighted elsewhere
+        in the app (``parent.pickedfeature``), so a feature too small to
+        make the default cut is still visible on demand.
+        """
+        always_include = [parent.pickedfeature] if getattr(parent, 'pickedfeature', '') else []
+        subset = ordination.top_loadings(loadings, n=25, always_include=always_include)
+
+        for feature, row in subset.iterrows():
+            xcoord, ycoord = row.iloc[0], row.iloc[1]
+            parent.ax[self.currplt].annotate(
+                '', xy=(xcoord, ycoord), xytext=(0, 0),
+                arrowprops=dict(arrowstyle='->', color='steelblue', lw=1))
+            parent.ax[self.currplt].annotate(
+                str(feature), xy=(xcoord, ycoord), fontsize=8, color='black')
+
+        # Pre-created empty artist for the highlighted-loading marker,
+        # following the same convention as the scores view's
+        # parent.highlight[currplt] -- updated on demand by
+        # MainWindow._refresh_highlight() via self.highlight_loading(),
+        # even when the highlighted feature isn't in the default top-25.
+        self.loadings_highlight, = parent.ax[self.currplt].plot([], [], 'o', markersize=12, color='yellow', zorder=5)
+        self.highlight_loading(getattr(parent, 'pickedfeature', ''), getattr(parent, 'highlightcol', (0, 0, 0, 0)))
+
+        parent.ax[self.currplt].axhline(0, color='grey', lw=0.5)
+        parent.ax[self.currplt].axvline(0, color='grey', lw=0.5)
+        parent.ax[self.currplt].set_xlabel(axis_labels[0], **self.fcsfont)
+        parent.ax[self.currplt].set_ylabel(axis_labels[1], **self.fcsfont)
+
+    def highlight_loading(self, feature, colour):
+        """Update the loadings-view highlight marker for ``feature`` (a
+        no-op outside the loadings view or before it's been drawn once).
+
+        Called from ``MainWindow._refresh_highlight()`` -- the same
+        pre-create-empty-artist/update-via-set_data convention every other
+        plot's highlight already follows, just driven by this plot's own
+        last-computed loadings instead of ``iondict``.
+        """
+        if self.view != 'Loadings' or self.loadings_df is None or not hasattr(self, 'loadings_highlight'):
+            return
+        if not feature or feature not in self.loadings_df.index:
+            self.loadings_highlight.set_data([], [])
+        else:
+            row = self.loadings_df.loc[feature]
+            self.loadings_highlight.set_data([row.iloc[0]], [row.iloc[1]])
+            self.loadings_highlight.set_color(colour)
+        self.parent.canvas[self.currplt].draw_idle()
+
     def plot_point_cov(self, points, nstd=2, ax=None, **kwargs):
         """Generate an ellipse for the confidence interval.
 

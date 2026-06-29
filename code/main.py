@@ -41,7 +41,7 @@ from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 from biogroups import compute_biological_groups
 from dbsearch import search_npatlas
 from searchtree import SearchTreePanel
-from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
+from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_ordination, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
 from indigo import Indigo
@@ -70,10 +70,6 @@ Check if low_memory=False increases ram usage for average grps?
 -add bypass for plots based on checkmark. possibly use if check: ... else: button.hide() then pass
 
 - distribution of CVs on bottom of cvplt?
-- allow visualization of key features (loadings/biplot) on multivar plt
-    (PCA itself already exists -- plot_PCA/goto_pca/checkbox field -- this is
-    specifically about showing which original features drive each component,
-    which plot_PCA doesn't do yet)
 
 #TODO#
 - in source spectra viewer in spectrum details tab plot with preexisting in source fragment deconvolution algoirthm
@@ -245,7 +241,15 @@ class MainWindow(QMainWindow):
         
         self.ui.setupUi(self)
         self.ui.label_credits.setText('v1.00.01 r26.06.29')
-                
+
+        # "PCA" was a misnomer left over from when this checkbox/button only
+        # ran NMDS (see plotting.plot_ordination) -- the underlying
+        # checkBox_pca objectName/analysis_params.PCA attribute stay
+        # unchanged for .mpct save-file compatibility; only the visible text
+        # and tooltip change.
+        self.ui.checkBox_pca.setText('Multivariate')
+        self.ui.btn_pca.setToolTip('Multivariate Ordination (PCA/NMDS/PLS-DA)')
+
         #initialize other dialog windows
         self.dialog = dialog()
         self.ftrdialog = ftrdialog()
@@ -766,6 +770,13 @@ class MainWindow(QMainWindow):
             )
             self.canvas['kmd'].draw_idle()
 
+        # Update the multivariate plot's loadings-view highlight (a separate
+        # concept from its scores view, which highlights a clicked *sample*
+        # via parent.pickedsample, not a feature -- so this only applies
+        # when self.pca exists and is currently showing loadings).
+        if getattr(self, 'pca', None) is not None:
+            self.pca.highlight_loading(self.pickedfeature, self.highlightcol)
+
         # Update feature plot with the selected feature
         self.highlight['featureplt'].set_data(
             [iondict.loc[self.pickedfeature, 'Retention time (min)']],
@@ -1062,10 +1073,10 @@ class MainWindow(QMainWindow):
         stop_functime('dendrogram complete')
 
         if params.PCA:
-            self._create_or_reset('pca', 'PCA/NMDS plot',
-                lambda: plot_PCA(self, 'pca', self.ui.frame_pca, pltfile, '', ''),
+            self._create_or_reset('pca', 'multivariate ordination plot',
+                lambda: plot_ordination(self, 'pca', self.ui.frame_pca, pltfile, '', ''),
                 lambda: self.pca.reset(pltfile, '', ''))
-            stop_functime('nmds complete')
+            stop_functime('ordination complete')
 
         if params.FC3Dplt:
             self._create_or_reset('fc3d', '3D fold-change plot',
