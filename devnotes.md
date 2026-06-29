@@ -324,21 +324,42 @@ substitution pattern as `plot_ordination`'s method/view bar):
 Both views' purity math is the same Qt-free linkage-traversal logic in
 `clusterpurity.py`, unit-tested in `tests/test_clusterpurity.py`.
 
-- **Red is "bridge" coloring, not "any impure ancestor"**: an earlier
-  version colored every impure merge red, including every ancestor above a
-  single mixing event all the way to the root -- since almost any real
-  dataset has *some* mixing somewhere, this painted most of the tree's
-  upper structure red regardless of how localized the actual problem was.
-  `purity_link_color_func()` now distinguishes three states per merge: pure
-  (`true_color`/green), a *bridge* -- impure, but at least one child was
-  itself pure, i.e. this is the specific merge where a different group
-  first gets bridged in (`false_color`/red), or *neutral* -- impure with
-  both children already impure, i.e. just continuing an already-known mix
-  further up the tree with no new information (`neutral_color`/black, the
-  same color as "no coloring" so it visually recedes). Verified with a
-  hand-built 4-group linkage matrix (deterministic merge order, no
-  clustering ambiguity) asserting the root of two already-mixed clades is
-  black, not red, while the two actual group-meeting points are red.
+- **Red marks proven non-monophyly (overlap), not "any impure merge"**: two
+  earlier attempts both got this wrong in opposite directions. First, every
+  impure merge was colored red, including every ancestor above a single
+  mixing event all the way to the root -- since almost any real dataset has
+  *some* mixing somewhere, this painted most of the tree's upper structure
+  red regardless of how localized the problem was. The second attempt
+  ("impure but at least one child was pure = bridge = red, both children
+  already impure = neutral") fixed the worst of the cascading but still
+  mis-colored real data: it could still mark a high-level merge red merely
+  because one side happened to be a single freshly-introduced pure clade,
+  *and* it could miss real tangles where two already-impure children share
+  a label without one side being trivially pure.
+
+  `purity_link_color_func()` now compares the two children's label sets
+  directly at each merge:
+  - identical and a single label -> monophyletic (`true_color`/green).
+  - **disjoint** (no label in common) -> neutral (`neutral_color`/black) --
+    a clean join of two regions that don't contradict each other, *even if
+    one or both children are themselves impure from a different label's
+    tangle further down*. This is what stops a low-level tangle from
+    cascading: once a tangled label has nothing more of itself left to fold
+    in, every merge above it only ever joins disjoint regions, so it goes
+    back to black.
+  - **overlap** (share >=1 label, without being identical-and-singleton) ->
+    polyphyletic (`false_color`/red) -- definitive proof that some label's
+    leaves are split across this exact merge (present on both sides), not
+    just "still mixed from an earlier merge".
+
+  Verified against the real example dataset's bootstrap dendrogram (the
+  case that exposed both earlier bugs): only the two merges that actually
+  re-unite a scattered sample's replicates (e.g. one sample's reps split
+  into two non-sister sub-clades that only meet again higher up) render
+  red; the higher-level merges joining that region with cleanly-resolved,
+  unrelated samples stay black, same as a hand-built synthetic linkage
+  (`tests/test_clusterpurity.py`'s `_scattered_pair_linkage`) reproducing
+  the same pattern deterministically.
 - **Bootstrap is now a per-tab checkbox, not a global one**: the
   plot-config dialog's "Bootstrap Analysis" checkbox (`checkBox_bootstrap`)
   only ever affected this one plot, so it moved into `plot_dendrogram`'s own

@@ -19,6 +19,30 @@ def _two_clean_groups():
     return data, labels
 
 
+def _scattered_pair_linkage():
+    """Hand-built linkage (not derived from real coordinates, so the merge
+    order is exact and unambiguous) reproducing the real-data pattern that
+    motivated the overlap-based coloring rule: labels P and Q are each
+    split across two separate leaves that DON'T merge with each other
+    first (P0, Q0, Q1, P1 -- interleaved, not P0+P1 then Q0+Q1), so neither
+    P nor Q is monophyletic -- plus an unrelated label R that cleanly joins
+    in afterward and should NOT show as part of the tangle.
+
+    Leaves: 0=P, 1=Q, 2=Q, 3=P, 4=R.
+    Merge order: (1,2)=Q+Q pure; (0, that)=P+{Q} disjoint bridge;
+    (3, that)=P+{P,Q} overlap -- the actual tangle; (4, that)=R+{P,Q}
+    disjoint again (R was never part of the P/Q mixing).
+    """
+    Z = np.array([
+        [1, 2, 0.1, 2],   # node 5: Q+Q            -> {Q}        (pure)
+        [0, 5, 1.0, 3],   # node 6: P + {Q}         -> {P,Q}      (disjoint)
+        [3, 6, 2.0, 4],   # node 7: P + {P,Q}       -> {P,Q}      (overlap!)
+        [4, 7, 3.0, 5],   # node 8: R + {P,Q}       -> {P,Q,R}    (disjoint)
+    ])
+    labels = ['P', 'Q', 'Q', 'P', 'R']
+    return Z, labels
+
+
 def test_purity_summary_both_groups_pure():
     data, labels = _two_clean_groups()
     Z = linkage(data, method='ward')
@@ -26,66 +50,50 @@ def test_purity_summary_both_groups_pure():
     assert (n_pure, n_total) == (2, 2)
 
 
-def test_purity_link_color_func_root_bridges_two_pure_clades():
+def test_purity_link_color_func_clean_disjoint_groups_stay_neutral_even_at_root():
     data, labels = _two_clean_groups()
     Z = linkage(data, method='ward')
     n_leaves = len(labels)
     color_func = purity_link_color_func(Z, labels)
 
     # The final merge (root) joins group A's whole clade with group B's
-    # whole clade -- both children are themselves pure, so this is exactly
-    # the "bridge" merge (the one and only point the two groups meet) and
-    # must be the false/bridge color, not the neutral one.
+    # whole clade -- their label sets are disjoint ({A} vs {B}, no overlap),
+    # so this is a clean join, not evidence either group is non-
+    # monophyletic. It must be the neutral color, NOT the polyphyletic one
+    # -- two cleanly-resolved groups simply existing in the same tree isn't
+    # itself a problem.
     root_node_id = n_leaves + len(Z) - 1
-    assert color_func(root_node_id) == 'red'
+    assert color_func(root_node_id) == 'black'
 
     # Every internal node strictly below the root is a within-group merge
-    # for this dataset (each group's 3 points cluster before the cross-group
-    # merge) -- those links must be the "pure" color.
+    # for this dataset -- those links must be the monophyletic color.
     for i in range(len(Z) - 1):
         node_id = n_leaves + i
         assert color_func(node_id) == 'green'
 
 
-def test_purity_link_color_func_does_not_cascade_red_up_the_whole_tree():
-    # Hand-built linkage (not derived from real coordinates, so the merge
-    # order is exact and unambiguous): 4 groups of 2 leaves each --
-    # A=(0,1), B=(2,3), C=(4,5), D=(6,7). Merge order: each group merges
-    # with itself first (pure), then A+B bridge, then C+D bridge, then the
-    # root merges the two already-impure (A+B) and (C+D) clades together.
-    # Z columns: [child1, child2, distance (unused), count (unused)].
-    Z = np.array([
-        [0, 1, 0.1, 2],    # node 8:  A+A  (pure)
-        [2, 3, 0.1, 2],    # node 9:  B+B  (pure)
-        [8, 9, 5.0, 4],    # node 10: A+B  (bridge -- both children pure)
-        [4, 5, 0.1, 2],    # node 11: C+C  (pure)
-        [6, 7, 0.1, 2],    # node 12: D+D  (pure)
-        [11, 12, 5.0, 4],  # node 13: C+D  (bridge -- both children pure)
-        [10, 13, 50.0, 8],  # node 14: (A+B)+(C+D) -- root
-    ])
-    labels = ['A', 'A', 'B', 'B', 'C', 'C', 'D', 'D']
+def test_purity_link_color_func_overlap_is_the_only_red_and_it_does_not_cascade():
+    Z, labels = _scattered_pair_linkage()
     color_func = purity_link_color_func(Z, labels)
 
-    assert color_func(8) == 'green'   # A+A
-    assert color_func(9) == 'green'   # B+B
-    assert color_func(10) == 'red'    # A+B bridge
-    assert color_func(11) == 'green'  # C+C
-    assert color_func(12) == 'green'  # D+D
-    assert color_func(13) == 'red'    # C+D bridge
-    # The root combines two ALREADY-impure clades -- no new bridge event,
-    # so it must NOT also render red (that's the "entire tree turns red"
-    # behaviour this function is specifically built to avoid).
-    assert color_func(14) == 'black'
+    assert color_func(5) == 'green'  # Q+Q, monophyletic
+    assert color_func(6) == 'black'  # P + {Q}: disjoint, clean bridge
+    assert color_func(7) == 'red'    # P + {P,Q}: OVERLAP -- the actual tangle
+    # R joining afterward is disjoint from {P,Q} -- R was never part of the
+    # P/Q mixing, so this must NOT also render red just because it's above
+    # (contains) the node-7 tangle. This is the specific behaviour this
+    # rule exists for: a real, low-level tangle must not paint every
+    # ancestor red all the way to the root.
+    assert color_func(8) == 'black'
 
 
 def test_purity_link_color_func_custom_colors():
-    data, labels = _two_clean_groups()
-    Z = linkage(data, method='ward')
-    color_func = purity_link_color_func(Z, labels, true_color='cyan', false_color='grey')
-    n_leaves = len(labels)
-    root_node_id = n_leaves + len(Z) - 1
-    assert color_func(root_node_id) == 'grey'
-    assert color_func(n_leaves) == 'cyan'
+    Z, labels = _scattered_pair_linkage()
+    color_func = purity_link_color_func(Z, labels, true_color='cyan', false_color='magenta', neutral_color='grey')
+    assert color_func(5) == 'cyan'
+    assert color_func(6) == 'grey'
+    assert color_func(7) == 'magenta'
+    assert color_func(8) == 'grey'
 
 
 def test_purity_summary_one_mismatched_leaf_breaks_purity_for_its_group():

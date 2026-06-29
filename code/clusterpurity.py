@@ -17,21 +17,28 @@ This module is Qt-free and unit-tested (see ``tests/test_clusterpurity.py``).
 def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='red', neutral_color='black'):
     """Build a ``link_color_func`` for ``scipy.cluster.hierarchy.dendrogram``.
 
-    Three-way coloring, not just pure-vs-not:
+    Three-way coloring, classified by comparing the two children's label
+    sets (not by simply asking "is the merge result impure", which would
+    paint every ancestor of a single mixing event red all the way to the
+    root):
 
-    - ``true_color`` ("pure"/monophyletic): every leaf under this link
+    - ``true_color`` ("monophyletic"): the two children's label sets are
+      identical and contain exactly one label -- every leaf under this link
       shares one label.
-    - ``false_color`` ("bridge"): this link is impure, but at least one of
-      its two children was itself pure (a single leaf counts as trivially
-      pure) -- this is the *specific* merge where a different label first
-      gets bridged in, i.e. exactly the "bridge sample"/"two groups meet
-      here" point.
-    - ``neutral_color``: this link is impure AND both children were already
-      impure -- i.e. it's just continuing an already-known mix further up
-      the tree, not new information. Without this third state, every
-      ancestor of a single bridge point would also render in
-      ``false_color``, painting most of the upper tree the "bad" color even
-      though only one merge actually caused it.
+    - ``false_color`` ("polyphyletic"): the two children's label sets
+      *overlap* (share at least one label) without being identical-and-
+      singleton -- this is definitive proof that some label's leaves are
+      split apart by this exact merge (some of that label is on each side),
+      i.e. genuinely non-monophyletic, not just "still impure from before".
+    - ``neutral_color``: the two children's label sets are *disjoint* (no
+      label in common) -- this merge simply joins two regions that don't
+      contradict each other; it's a clean bridge even if one or both
+      children are themselves impure from a *different* label's tangle
+      further down. This is what keeps a single low-level tangle from
+      cascading red all the way up the tree: once a tangled label's clade
+      stops growing (nothing more of that label to fold in), every merge
+      above it only ever joins disjoint regions, so it reverts to
+      ``neutral_color``.
 
     Args:
         Z: linkage matrix (``scipy.cluster.hierarchy.linkage`` or
@@ -47,21 +54,19 @@ def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='red'
     """
     n_leaves = len(leaf_labels)
     leaf_label_sets = {i: {leaf_labels[i]} for i in range(n_leaves)}
-    is_pure = {i: True for i in range(n_leaves)}  # every leaf is trivially pure
     colors = {}
     for i, row in enumerate(Z):
         a, b = int(row[0]), int(row[1])
         node_id = n_leaves + i
-        merged = leaf_label_sets[a] | leaf_label_sets[b]
+        set_a, set_b = leaf_label_sets[a], leaf_label_sets[b]
+        merged = set_a | set_b
         leaf_label_sets[node_id] = merged
-        pure = len(merged) == 1
-        is_pure[node_id] = pure
-        if pure:
+        if len(merged) == 1:
             colors[node_id] = true_color
-        elif is_pure[a] or is_pure[b]:
-            colors[node_id] = false_color
-        else:
+        elif set_a.isdisjoint(set_b):
             colors[node_id] = neutral_color
+        else:
+            colors[node_id] = false_color
     return lambda k: colors.get(k, neutral_color)
 
 
