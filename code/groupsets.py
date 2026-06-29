@@ -122,6 +122,34 @@ class GroupSetModel:
             del self._items[index]
         self.select(self._selected)
 
+    def move(self, from_index, to_index):
+        """Reorder the groupset at ``from_index`` to ``to_index``.
+
+        Both indices are clamped to the valid range; out-of-range or equal
+        indices are a no-op. Selection follows the moved item, so the
+        groupset that was selected before the move is still selected after
+        (by identity, not by index) -- a drag-and-drop reorder shouldn't
+        change which groupset is being edited.
+        """
+        if not self._items:
+            return
+        from_index = max(0, min(from_index, len(self._items) - 1))
+        to_index = max(0, min(to_index, len(self._items) - 1))
+        if from_index == to_index:
+            return
+        selected_item = self.selected
+        groupset = self._items.pop(from_index)
+        self._items.insert(to_index, groupset)
+        if selected_item is not None:
+            # Identity, not '==' -- GroupSet.__eq__ is value-based, and two
+            # distinct groupsets can compare equal (e.g. freshly added ones
+            # before either is edited), so list.index() could pick the wrong
+            # one.
+            for i, item in enumerate(self._items):
+                if item is selected_item:
+                    self._selected = i
+                    break
+
     def update(self, index, *, name=None, src=None, incl=None, excl=None, colour=None):
         """Overwrite the given fields of the groupset at ``index``."""
         groupset = self._items[index]

@@ -100,6 +100,78 @@ def test_remove_all_items_leaves_selection_at_negative_one():
 
 
 # --------------------------------------------------------------------------- #
+# GroupSetModel: move (reordering)
+# --------------------------------------------------------------------------- #
+
+def test_move_reorders_items():
+    model = GroupSetModel()
+    model.add('a')
+    model.add('b')
+    model.add('c')
+    model.move(0, 2)
+    assert [g.name for g in model] == ['b', 'c', 'a']
+
+
+def test_move_keeps_selection_on_the_moved_item():
+    model = GroupSetModel()
+    model.add('a')
+    model.add('b')
+    model.add('c')
+    model.select(0)  # 'a' selected
+    model.move(0, 2)
+    assert model.selected.name == 'a'
+    assert model.selected_index == 2
+
+
+def test_move_keeps_selection_on_a_different_item_that_shifted_position():
+    model = GroupSetModel()
+    model.add('a')
+    model.add('b')
+    model.add('c')
+    model.select(1)  # 'b' selected
+    model.move(0, 2)  # moves 'a' past 'b', so 'b' shifts from index 1 to 0
+    assert model.selected.name == 'b'
+    assert model.selected_index == 0
+
+
+def test_move_with_equal_indices_is_a_noop():
+    model = GroupSetModel()
+    model.add('a')
+    model.add('b')
+    model.move(1, 1)
+    assert [g.name for g in model] == ['a', 'b']
+
+
+def test_move_clamps_out_of_range_indices():
+    model = GroupSetModel()
+    model.add('a')
+    model.add('b')
+    model.add('c')
+    model.move(-5, 99)
+    assert [g.name for g in model] == ['b', 'c', 'a']
+
+
+def test_move_on_empty_model_is_a_noop():
+    model = GroupSetModel()
+    model.move(0, 1)  # must not raise
+    assert len(model) == 0
+
+
+def test_move_disambiguates_value_equal_groupsets_by_identity():
+    # Two freshly-added default groupsets compare equal (GroupSet.__eq__ is
+    # value-based, and both start with identical fields), so move() must
+    # track the selected item by identity, not by list.index()'s '=='.
+    model = GroupSetModel()
+    model.add('dup')
+    model.add('dup')
+    model.select(0)
+    first = model.selected
+    model.move(0, 1)
+    assert model.selected is first
+    assert model.selected_index == 1
+
+
+# --------------------------------------------------------------------------- #
 # GroupSetModel: CRUD
 # --------------------------------------------------------------------------- #
 

@@ -84,6 +84,12 @@ Check if low_memory=False increases ram usage for average grps?
 - add other ordination options like pca, pls-da, etc etc
 - add custom keyword arguments for each plot to make calling them easier
 - make it so groups can be reordered in the groupsets widgets?
+    ~model-layer support done: GroupSetModel.move() (groupsets.py), tested in
+    test_groupsets.py. UI drag-drop wiring (listWidget_pltgrps InternalMove +
+    syncing its rowsMoved signal to model.move()) not done -- needs a live
+    GUI session to verify the selection-tracking interacts correctly with
+    updatesets()'s existing blockSignals dance, which isn't something to
+    guess at unverified
 - consider if indexing and feature highly functions in plot options have any easy wins for optimization or disk use. (prob not)
 - make goto buttons just one class and lambda an index for the stacked widgets
     when connecting!
