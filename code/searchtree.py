@@ -39,6 +39,38 @@ _NUMERIC_FORMATS = {
     7: '{:.0f}',  # Hits
 }
 
+# Matches the dark palette ui_main.py already sets on the Designer treeWidget
+# (rgb(70,70,70)-family backgrounds, rgb(200,200,200) light-grey text) --
+# these widgets are newly created at runtime, so they don't pick that up
+# automatically the way the treeWidget itself did from setupUi().
+_FILTER_BAR_STYLE = """
+QWidget {
+    background-color: rgba(70,70,70,25);
+}
+QLineEdit, QToolButton {
+    background-color: rgb(50,50,50);
+    color: rgb(200,200,200);
+    border: 1px solid rgb(70,70,70);
+    border-radius: 2px;
+    padding: 2px;
+}
+QLabel {
+    color: rgb(200,200,200);
+    background: transparent;
+}
+QToolButton::menu-indicator {
+    image: none;
+}
+QMenu {
+    background-color: rgb(50,50,50);
+    color: rgb(200,200,200);
+    border: 1px solid rgb(70,70,70);
+}
+QMenu::item:selected {
+    background-color: rgb(70,70,70);
+}
+"""
+
 
 class IonTableModel(QtCore.QAbstractTableModel):
     """One row per feature; columns match COLUMNS. Stores raw (unformatted,
@@ -136,6 +168,12 @@ class SearchTreePanel:
         index = layout.indexOf(old_tree_widget)
         parent = old_tree_widget.parentWidget()
 
+        # Reuse the Designer-set dark-theme stylesheet rather than guessing
+        # colours -- the new QTreeView is a genuinely different widget
+        # instance, so it doesn't inherit what setupUi() applied to the one
+        # being replaced.
+        old_stylesheet = old_tree_widget.styleSheet()
+
         layout.removeWidget(old_tree_widget)
         old_tree_widget.setParent(None)
         old_tree_widget.deleteLater()
@@ -151,6 +189,8 @@ class SearchTreePanel:
         self.view.setAlternatingRowColors(True)
         self.view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.view.setUniformRowHeights(True)
+        if old_stylesheet:
+            self.view.setStyleSheet(old_stylesheet)
 
         container = QtWidgets.QWidget(parent)
         outer = QtWidgets.QVBoxLayout(container)
@@ -158,8 +198,10 @@ class SearchTreePanel:
         outer.setSpacing(2)
 
         filter_bar = QtWidgets.QWidget(container)
+        filter_bar.setStyleSheet(_FILTER_BAR_STYLE)
         self._filter_layout = QtWidgets.QHBoxLayout(filter_bar)
-        self._filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._filter_layout.setContentsMargins(4, 2, 4, 2)
+        self._filter_layout.setSpacing(4)
 
         self._category_buttons = {}
         for column in range(len(COLUMNS)):
