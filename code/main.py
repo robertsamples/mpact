@@ -6,6 +6,7 @@ Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 import re
 
 import sys
+import multiprocessing
 import numpy as np
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
@@ -243,7 +244,7 @@ class MainWindow(QMainWindow):
         #self.show() # makes window reappear, acts like normal window now (on top now but can be underneath if you raise another window)
         
         self.ui.setupUi(self)
-        self.ui.label_credits.setText('v1.00 r24.11.17')
+        self.ui.label_credits.setText('v1.00.01 r26.06.29')
                 
         #initialize other dialog windows
         self.dialog = dialog()
@@ -1357,6 +1358,13 @@ class MainWindow(QMainWindow):
         
     
 if __name__ == "__main__":
+    # Required for pvclust.py's multiprocessing.Pool() (bootstrap dendrogram)
+    # to work in a PyInstaller-frozen exe: without it, each worker process
+    # re-executes the whole frozen program from scratch instead of running
+    # just the pool target, spawning a new QApplication/MainWindow per
+    # worker. A no-op everywhere else (plain `python main.py`, Spyder),
+    # so safe to call unconditionally.
+    multiprocessing.freeze_support()
     app = QtWidgets.QApplication(sys.argv)
     if sys.platform != 'win32':
         app.setStyle('Fusion')

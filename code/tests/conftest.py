@@ -15,7 +15,7 @@ if CODE_DIR not in sys.path:
 # PyQt5's "offscreen" platform plugin lets QApplication/QWidget subclasses be
 # constructed and exercised with no real display -- this does NOT make
 # main.py importable headlessly (the main<->ui_functions circular import
-# documented in CLAUDE.md is unrelated and still applies), but it does mean
+# documented in devnotes.md is unrelated and still applies), but it does mean
 # standalone Qt-coupled modules that don't import main.py (e.g. searchtree.py)
 # can have their actual widget/model/signal behaviour covered by real tests
 # instead of relying solely on manual testing. Set before any test imports
