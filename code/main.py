@@ -41,7 +41,7 @@ from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 from biogroups import compute_biological_groups
 from dbsearch import search_npatlas
 from searchtree import SearchTreePanel
-from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_ordination, prev_cv, gen_upsetplt, gen_treemap
+from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_ordination, prev_cv, plot_upset, plot_treemap
 import getfragdb
 
 from indigo import Indigo
@@ -1056,6 +1056,11 @@ class MainWindow(QMainWindow):
         dfs = self.filtereddfs
         grpsts = self.groupsets
 
+        self._create_or_reset('treemap', 'treemap',
+            lambda: plot_treemap(self, 'treemap', self.ui.frame_treemap, pltfile, '', ''),
+            lambda: self.treemap.reset(pltfile, '', ''))
+        stop_functime('treemap complete')
+
         if params.CVfil:
             self._create_or_reset('prevcv', 'CV plot',
                 lambda: prev_cv(self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none'),
@@ -1119,6 +1124,11 @@ class MainWindow(QMainWindow):
             lambda: self.samplecorr.reset(iondictfile, dfs, grpsts))
         stop_functime('samplecorr complete')
 
+        self._create_or_reset('upset', 'upset plot',
+            lambda: plot_upset(self, 'upset', self.ui.frame_upset, iondictfile, '', ''),
+            lambda: self.upset.reset(iondictfile, '', ''))
+        stop_functime('upsetplt complete')
+
     def run_analysis(self):
         # Ignore re-clicks while an analysis is already running on the worker thread.
         if getattr(self, '_analysis_thread', None) is not None and self._analysis_thread.isRunning():
@@ -1171,12 +1181,6 @@ class MainWindow(QMainWindow):
             self.ui.btn_run.setEnabled(True)
 
     def _finish_analysis(self):
-        try:
-            gen_treemap(self)  # move back to end
-        except Exception:
-            print("not generating tremap due to an error")
-        stop_functime('treemap complete')
-        
         # Used for point opacity based on abundance colouring
         iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         self.analysis_paramsgui.maxval = iondict['logmax'].max()
@@ -1224,11 +1228,6 @@ class MainWindow(QMainWindow):
             self.fillfttree()
             self.dbsearchdone = True
         
-        try:
-            gen_upsetplt(self)
-        except Exception:
-            print("not generating upset plot due to an error")
-        stop_functime('upsetplt complete')
         self.ui.label_status.setText('Analysis Complete')
         stop_functime('analysis complete')
         print('')

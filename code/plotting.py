@@ -31,7 +31,7 @@ import colorsys
 import platform
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
-from PyQt5.QtGui import (QBrush, QColor, QIcon, QPalette, QPainter, QPixmap)
+from PyQt5.QtGui import (QBrush, QColor, QIcon, QPalette, QPainter)
 from PyQt5.QtWidgets import *
 from pathlib import Path
 
@@ -1361,114 +1361,165 @@ class prev_cv(ui_plot):
         parent.canvas[currplt].draw()
 
     
-def gen_upsetplt(parent):    #need to do something to handle groups with names that are substrings of other group names
+def _detach_placeholder_widget(frame, old_widget):
+    """Remove a Designer-placed placeholder widget (and the layout holding
+    it) from ``frame`` so a fresh layout can be installed in its place.
+
+    Most plot frames in this app start out empty in Designer, so
+    ``ui_plot.__init__`` can just call ``frame.setLayout(...)`` directly.
+    ``frame_treemap``/``frame_upset`` are the exception -- Designer gave
+    them a layout with a placeholder ``QLabel`` (the old static-image
+    target) already in it, and Qt refuses ``setLayout()`` on a frame that
+    already has one. Reparenting the old layout onto a throwaway widget
+    (the standard Qt trick for "delete this layout") detaches it from
+    ``frame`` without touching anything else -- same runtime
+    widget-substitution pattern as searchtree.py's filter-bar swap.
     """
-    Generate an upset plot to visualize sets of compounds in groups. This function also handles groups with names that are substrings of other group names.
+    old_layout = frame.layout()
+    if old_layout is not None:
+        old_layout.removeWidget(old_widget)
+        old_widget.setParent(None)
+        old_widget.deleteLater()
+        QtWidgets.QWidget().setLayout(old_layout)
 
-    Parameters:
-    parent (object): The parent object that the generated plot will be a child of.
 
-    Returns:
-    None
+class plot_treemap(ui_plot):
+    """Treemap of how many features each enabled filter removed.
+
+    Drawn directly onto a persistent FigureCanvas (same runtime-widget-
+    substitution + ui_plot pattern as every other plot tab) instead of the
+    previous ``squarify.plot()`` -> ``savefig('treemap.png')`` -> ``QPixmap``
+    round trip into a Designer-placed ``QLabel`` (``label_treemap``) -- that
+    PNG round trip meant no zoom/pan/save-at-resolution toolbar, and a flat
+    raster file rewritten at the repo root on every run.
     """
-    iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
-                            
-    # Apply filters if required
-    if parent.analysis_paramsgui.relfil:
-        iondict = iondict[iondict['pass_relfil']]
-    if parent.analysis_paramsgui.decon:
-        iondict = iondict[iondict['pass_insource']]
-    if parent.analysis_paramsgui.blnkfltr:
-        iondict = iondict[iondict['pass_blnkfil']]
-    if parent.analysis_paramsgui.CVfil:
-        iondict = iondict[iondict['pass_cvfil']]
-    
-    # Prepare data for upset plot
-    iongroups = iondict['groups'].tolist()
-    freq = {}
-    biolgroups = []
-    for item in iongroups:
-        if item not in freq:
-            freq[item] = 0
-        freq[item] += 1
-    
-    header = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0, 1, 2]).iloc[0, :]
-    for elem in header:
-        if elem not in biolgroups:
-            biolgroups.append(elem)
-    
-    sets = [' ' + elem for elem in list(freq.keys())]
-    size = list(freq.values())
-    setdf = pd.DataFrame({'groups': sets})
-    for elem in biolgroups:  #have to do this if one group is a substring of another, add space
-        setdf[elem] = setdf['groups'].str.contains(' ' + elem)
-    setdf['size'] = size
-    setdf = setdf.iloc[:, 1:]
-    setdf = setdf.set_index(biolgroups)['size']
-    
-    # Plot and display the upset plot
-    with plt.rc_context({"font.size": 8}):
-        upsetplt = upsetplot.plot(setdf, show_counts='%d', show_percentages=True, sort_categories_by=None)
-    
-    figup = upsetplt['matrix'].figure
-    figup.set_size_inches(5, 4)
-    figup.set_facecolor((0, 0, 0, 0))
-    upsetplt['intersections'].set_facecolor((1, 1, 1, .25))
-    figup.savefig('test_upsetplt.png', dpi=150, bbox_inches='tight')
-    pixmap = QPixmap('test_upsetplt.png')
-    parent.ui.label_upset.setPixmap(pixmap)                                                                     
 
-def gen_treemap(parent):
-    #generate treemap for visualization of filtering levels
-    #needed to refilter data and see how df row lengths change to avoid issues with one feature being in multiple filter lists
+    def __init__(self, parent, currplt, frame, file, filtereddfs, groupsets):
+        _detach_placeholder_widget(frame, parent.ui.label_treemap)
+        ui_plot.__init__(self, parent, currplt, frame)
+        self.parent = parent
+        self.currplt = currplt
+        self.plot(parent, file, filtereddfs, groupsets)
+
+    def plot(self, parent, file, filtereddfs, groupsets):
+        msdata_filtered = cached_read_csv(
+            parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'),
+            sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+        iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+
+        fltrcnt, color = {}, []
+        current = len(iondict.index)
+
+        if parent.analysis_paramsgui.relfil:
+            filteredsetsize = len(iondict[iondict['pass_relfil']].index)
+            fltrcnt['Mispicked'] = current - filteredsetsize
+            current = filteredsetsize
+            color.append('#0000ff')
+
+        if parent.analysis_paramsgui.blnkfltr:
+            filteredsetsize = len(iondict[iondict['pass_blnkfil']].index)
+            fltrcnt['Blank'] = current - filteredsetsize
+            current = filteredsetsize
+            color.append('#00aaaa')
+
+        if parent.analysis_paramsgui.CVfil:
+            fltrcnt['Nonreproducible'] = len(parent.ionfilters['cv'].ions)
+            current = current - fltrcnt['Nonreproducible']
+            color.append('#ff0000')
+
+        if parent.analysis_paramsgui.decon:
+            fltrcnt['Insource'] = len(parent.ionfilters['insource'].ions)
+            color.append('#00aa00')
+
+        fltrcnt['High Quality'] = len(msdata_filtered.index)
+        color.append('#000000')
+
+        sizes = list(fltrcnt.values())
+        total_size = sum(sizes)
+        labels = [f"{label}\n{size}\n{round(100 * size / total_size, 1)}%" for label, size in fltrcnt.items()]
+
+        ax = parent.ax[self.currplt]
+        ax.clear()
+        squarify.plot(sizes=sizes, label=labels, color=color, alpha=0.3, text_kwargs={'fontsize': 10}, ax=ax)
+        ax.axis('off')
+        parent.canvas[self.currplt].draw()
+
+
+class plot_upset:
+    """Upset plot of how filtered features distribute across groupsets.
+
+    Drawn directly onto a persistent Figure -- ``upsetplot.plot()`` accepts
+    an existing ``fig=`` instead of always creating its own -- rather than
+    the previous ``upsetplot.plot()`` -> ``savefig('test_upsetplt.png')`` ->
+    ``QPixmap`` round trip into the Designer-placed ``label_upset``.
+
+    Doesn't subclass ``ui_plot``, the same as ``plot_heatmap`` and for the
+    same reason: ``upsetplot`` lays out several axes (matrix, totals,
+    intersections, shading) on the figure itself via its own gridspec --
+    there's no single "ax" to hand callers the way every scatter/line plot
+    here has, so ``ui_plot.__init__``'s single pre-made ``ax`` would just be
+    an unused, overlapping blank axes.
     """
-    The gen_treemap function generates a treemap for visualizing filtering levels. The function reads a CSV file containing the
-    filtered data and another CSV file containing information about the ions. The function then filters the ion data based on 
-    various filter options and calculates the number of ions filtered by each filter. Finally, the function generates a treemap 
-    to display the number of ions that passed each filter and saves it as a PNG file. The treemap is then displayed in a QLabel in the GUI.
 
-    Args:
-    
-    parent: the parent widget where the treemap will be displayed
+    def __init__(self, parent, currplt, frame, file, filtereddfs, groupsets):
+        _detach_placeholder_widget(frame, parent.ui.label_upset)
+        self.parent = parent
+        self.currplt = currplt
 
-    """
-    plt.clf()
-    msdata_filtered = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-    fltrcnt, color = {}, []
-    iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-    total = len(iondict.index)
-    current = total
-    
-    if parent.analysis_paramsgui.relfil:
-        filteredsetsize = len(iondict[iondict['pass_relfil']].index)
-        fltrcnt['Mispicked'] = current - filteredsetsize
-        current = filteredsetsize
-        color.append('#0000ff')
-    
-    if parent.analysis_paramsgui.blnkfltr:
-        filteredsetsize = len(iondict[iondict['pass_blnkfil']].index)
-        fltrcnt['Blank'] = current - filteredsetsize
-        current = filteredsetsize
-        color.append('#00aaaa')
-    
-    if parent.analysis_paramsgui.CVfil:
-        fltrcnt['Nonreproducible'] = len(parent.ionfilters['cv'].ions)
-        current = current - fltrcnt['Nonreproducible']
-        color.append('#ff0000')
-    
-    if parent.analysis_paramsgui.decon:
-        fltrcnt['Insource'] = len(parent.ionfilters['insource'].ions)
-        color.append('#00aa00')
-    
-    fltrcnt['High Quality'] = len(msdata_filtered.index)
-    color.append('#000000')
+        parent.fig[currplt] = Figure()
+        parent.pltlayout[currplt] = QtWidgets.QVBoxLayout()
+        parent.canvas[currplt] = FigureCanvas(parent.fig[currplt])
+        parent.pltlayout[currplt].addWidget(parent.canvas[currplt])
+        parent.toolbar[currplt] = NavigationToolbar(parent.canvas[currplt], parent)
+        parent.toolbar[currplt].setStyleSheet("background-color:rgba(225,225,225,0);")
+        parent.pltlayout[currplt].addWidget(parent.toolbar[currplt])
+        frame.setLayout(parent.pltlayout[currplt])
 
-    sizes = list(fltrcnt.values())
-    total_size = sum(fltrcnt.values())
-    labels = [f"{label}\n{size}\n{round(100*size/total_size,1)}%" for label, size in fltrcnt.items()]
+        self.plotbackground = (.89, .89, .89, 0)
+        self.plot(parent, file, filtereddfs, groupsets)
 
-    squarify.plot(sizes=sizes, label=labels, color=color, alpha=0.3, text_kwargs={'fontsize': 10})
-    plt.axis('off')
-    plt.savefig('treemap.png', dpi=150, bbox_inches='tight')
-    pixmap = QPixmap('treemap.png')
-    parent.ui.label_treemap.setPixmap(pixmap)
+    def plot(self, parent, file, filtereddfs, groupsets):
+        # upsetplot.plot() lays out fresh axes via its own gridspec on
+        # whatever figure it's given -- clear the figure first so repeated
+        # calls (regenerate/Apply) don't pile up axes on top of each other.
+        parent.fig[self.currplt].clf()
+
+        iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
+        if parent.analysis_paramsgui.relfil:
+            iondict = iondict[iondict['pass_relfil']]
+        if parent.analysis_paramsgui.decon:
+            iondict = iondict[iondict['pass_insource']]
+        if parent.analysis_paramsgui.blnkfltr:
+            iondict = iondict[iondict['pass_blnkfil']]
+        if parent.analysis_paramsgui.CVfil:
+            iondict = iondict[iondict['pass_cvfil']]
+
+        iongroups = iondict['groups'].tolist()
+        freq = {}
+        for item in iongroups:
+            freq[item] = freq.get(item, 0) + 1
+
+        header = cached_read_csv(
+            parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'),
+            sep=',', header=None, index_col=[0, 1, 2]).iloc[0, :]
+        biolgroups = []
+        for elem in header:
+            if elem not in biolgroups:
+                biolgroups.append(elem)
+
+        sets = [' ' + elem for elem in freq.keys()]
+        setdf = pd.DataFrame({'groups': sets})
+        for elem in biolgroups:  # space-prefix handles one group name being a substring of another
+            setdf[elem] = setdf['groups'].str.contains(' ' + elem)
+        setdf['size'] = list(freq.values())
+        setdf = setdf.iloc[:, 1:].set_index(biolgroups)['size']
+
+        with plt.rc_context({"font.size": 8}):
+            upsetplt = upsetplot.plot(setdf, fig=parent.fig[self.currplt], show_counts='%d', show_percentages=True, sort_categories_by=None)
+
+        parent.fig[self.currplt].set_facecolor(self.plotbackground)
+        upsetplt['intersections'].set_facecolor((1, 1, 1, .25))
+        parent.canvas[self.currplt].draw()
+
+    def reset(self, file, filtereddfs, groupsets):
+        self.plot(self.parent, file, filtereddfs, groupsets)
