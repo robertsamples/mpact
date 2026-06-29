@@ -234,16 +234,44 @@ only handles the combo boxes, axes, and pick events.
 - **NMDS has no linear feature loadings** (it's a rank-based embedding, not
   a linear projection) — its Loadings view uses `ordination.nmds_loading_proxy()`,
   per-feature correlation with each NMDS axis (the standard ecology "vector
-  fitting"/`envfit` approach), not real loadings. Its percent-explained axis
-  label is also captioned distinctly from PCA/PLS-DA's ("% of embedding
-  variance" vs. real original-feature-space variance), since the two
-  quantities aren't comparable.
+  fitting"/`envfit` approach), not real loadings. **NMDS's axis labels don't
+  show percent-explained at all** (just "NMDS1"/"NMDS2") — NMDS is a
+  rank-based embedding, not a linear decomposition of the feature space, so
+  it doesn't canonically have a %-variance-explained quantity the way
+  PCA/PLS-DA do; the plot title shows stress instead, the conventional NMDS
+  fit-quality metric.
+- **PCA/PLS-DA are autoscaled** (`ordination.autoscale()`: mean-center +
+  scale each feature to unit variance) before fitting — without this, raw
+  intensities (confirmed on real example data: feature standard deviations
+  ranged from ~1.8 to ~10,000, a ~5800x spread) let a handful of
+  high-abundance features dominate both the apparent explained-variance and
+  the loadings, drowning out features that actually separate the
+  biological groups but happen to have lower raw intensity. This is the
+  standard chemometrics pretreatment for PCA/PLS-DA on this kind of data;
+  NMDS is deliberately NOT autoscaled (its Bray-Curtis dissimilarity is
+  conventionally computed on raw/relative abundances).
 - **PLS-DA's explained-variance gotcha**: `sklearn.cross_decomposition.PLSRegression`
-  defaults to `scale=True` (standardizes X internally), which silently
-  produced explained-variance ratios off by ~6 orders of magnitude when
-  compared against unscaled total variance — caught only by running against
-  real data, not by inspection. Fixed with `scale=False`, matching PCA's
-  plain-centered (not standardized) treatment.
+  defaults to `scale=True` (standardizes X internally), which -- before
+  autoscaling was added -- silently produced explained-variance ratios off
+  by ~6 orders of magnitude when compared against unscaled total variance,
+  caught only by running against real data, not by inspection. Fixed with
+  `scale=False` and autoscaling `x` ourselves first instead (matching PCA's
+  treatment, and avoiding PLSRegression's `scale=True` also incorrectly
+  scaling the 0/1 group-membership dummy columns).
+- **Loadings-view rendering gotchas** (both only surfaced by checking
+  against real data, not by inspection): (1) `ax.annotate()`-drawn arrows
+  don't reliably participate in matplotlib's autoscale the way
+  `ax.scatter()`/`ax.plot()` do — confirmed empirically that plotted arrow
+  tips could fall outside the axis' auto-picked view limits — so
+  `plot_ordination._plot_loadings()` now sets `ax.set_xlim`/`set_ylim`
+  explicitly from the actually-plotted subset's coordinates, symmetric
+  around 0. (2) `ordination.top_loadings()` must be called with only the 2
+  displayed components (`loadings.iloc[:, :2]`), not the full (up to
+  10-component) loadings — ranking by overall magnitude across all
+  components could let a feature into the "top 25" purely from a large
+  contribution to some unplotted component while barely showing up in the
+  actual PC1-vs-PC2 view, displacing a feature that's genuinely prominent
+  there.
 - **OPLS-DA intentionally not implemented**: no native scikit-learn support;
   the alternatives (the unmaintained `pyopls` package, or a from-scratch
   orthogonal-signal-correction implementation) are both riskier than

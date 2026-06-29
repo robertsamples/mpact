@@ -100,8 +100,29 @@ def load_ordination_matrix(file, raw_msdata_header, collapse_replicates):
     return x, biolgroup
 
 
+def autoscale(x):
+    """Mean-center and scale each feature to unit variance ("UV-scaling" /
+    "autoscaling" in chemometrics terminology -- the standard pre-treatment
+    for PCA/PLS-DA on mass-spec intensity data).
+
+    Without this, raw intensities (which can span several orders of
+    magnitude between features -- confirmed on real example data: feature
+    standard deviations ranged from ~1.8 to ~10,000, a ~5800x spread) let a
+    handful of high-abundance features dominate both the apparent
+    explained-variance and the loadings, regardless of which features
+    actually separate the biological groups. NMDS is deliberately NOT put
+    through this -- its Bray-Curtis dissimilarity is conventionally computed
+    on raw (or relative) abundances, not standardized ones.
+    """
+    std = x.std(axis=0)
+    std = std.replace(0, 1)  # a zero-variance feature would divide by zero; leave it at 0 instead
+    return (x - x.mean(axis=0)) / std
+
+
 def run_pca(x, n_components):
-    """Plain PCA on the samples x features matrix.
+    """PCA on the samples x features matrix, after autoscaling (see
+    ``autoscale()``) so the result isn't dominated by whichever features
+    happen to have the largest raw intensity.
 
     Returns:
         (scores, loadings, explained_variance_ratio): ``scores`` is a
@@ -110,8 +131,9 @@ def run_pca(x, n_components):
         contribution to each component; ``explained_variance_ratio`` is an
         ndarray of length ``n_components``.
     """
+    x_scaled = autoscale(x)
     pca = PCA(n_components=n_components)
-    scores = pca.fit_transform(x.values - x.values.mean(axis=0))
+    scores = pca.fit_transform(x_scaled.values)
     columns = [f'PC{i + 1}' for i in range(n_components)]
     scores = pd.DataFrame(scores, index=x.index, columns=columns)
     loadings = pd.DataFrame(pca.components_.T, index=x.columns, columns=columns)
@@ -186,25 +208,26 @@ def run_plsda(x, y, n_components):
         ``run_pca``'s. scikit-learn doesn't expose an explained-variance
         ratio for PLS directly, so it's computed manually here as each
         component's X-score variance divided by the total variance of
-        (centered) ``x`` -- the standard approach for reporting %-explained
-        on a PLS biplot.
+        (autoscaled) ``x`` -- the standard approach for reporting
+        %-explained on a PLS biplot.
     """
+    x_scaled = autoscale(x)
     y_dummies = pd.get_dummies(y)
-    # scale=False: PLSRegression's default scale=True standardizes X (and Y)
-    # to unit variance per column internally, so x_scores_ would otherwise
-    # live on a different scale than x_centered below -- comparing the two
-    # directly (as the explained-variance-ratio calc does) silently produced
-    # a near-zero, meaningless ratio until this was caught by running this
-    # against real data (see the scratch script / devnotes.md).
+    # scale=False: we already autoscaled x ourselves (above), consistent
+    # with run_pca -- letting PLSRegression's default scale=True scale it
+    # AGAIN (and scale the 0/1 dummy y columns, which doesn't make sense for
+    # group-membership indicators) would both double-scale x and distort y.
+    # (scale=False also previously fixed a bug where x_scores_ lived on a
+    # different scale than the unscaled total-variance denominator below,
+    # before autoscaling was added -- see devnotes.md.)
     pls = PLSRegression(n_components=n_components, scale=False)
-    pls.fit(x.values, y_dummies.values)
+    pls.fit(x_scaled.values, y_dummies.values)
     x_scores = pls.x_scores_
     columns = [f'PLS{i + 1}' for i in range(n_components)]
     scores = pd.DataFrame(x_scores, index=x.index, columns=columns)
     loadings = pd.DataFrame(pls.x_loadings_, index=x.columns, columns=columns)
 
-    x_centered = x.values - x.values.mean(axis=0)
-    total_variance = np.sum(x_centered ** 2)
+    total_variance = np.sum(x_scaled.values ** 2)
     component_variance = np.sum(x_scores ** 2, axis=0)
     explained_variance_ratio = component_variance / total_variance
     return scores, loadings, explained_variance_ratio

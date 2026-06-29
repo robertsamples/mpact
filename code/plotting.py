@@ -831,19 +831,24 @@ class plot_dendrogram(ui_plot):
             left=0.1, right=0.95, bottom=0.35, top=0.9, hspace=0.2, wspace=0.2)
         parent.canvas[self.currplt].draw()
 
+_ORDINATION_SWITCHER_BAR_HEIGHT = 32
+
+# Unlike searchtree.py's filter bar (a dark-themed tab), page_pca's
+# background is light (rgba(225,225,225,255), see ui_main.py) -- dark text
+# on a light/white combo box, not searchtree's light-on-dark scheme.
 _ORDINATION_SWITCHER_STYLE = """
 QWidget {
-    background-color: rgba(70,70,70,25);
+    background: transparent;
 }
 QComboBox {
-    background-color: rgb(50,50,50);
-    color: rgb(200,200,200);
-    border: 1px solid rgb(70,70,70);
+    background-color: rgb(255,255,255);
+    color: rgb(30,30,30);
+    border: 1px solid rgb(150,150,150);
     border-radius: 2px;
     padding: 2px;
 }
 QLabel {
-    color: rgb(200,200,200);
+    color: rgb(30,30,30);
     background: transparent;
 }
 """
@@ -883,6 +888,7 @@ class plot_ordination(ui_plot):
     def _build_switcher_bar(self, parent, currplt):
         bar = QtWidgets.QWidget()
         bar.setStyleSheet(_ORDINATION_SWITCHER_STYLE)
+        bar.setMaximumHeight(_ORDINATION_SWITCHER_BAR_HEIGHT)
         layout = QtWidgets.QHBoxLayout(bar)
         layout.setContentsMargins(4, 2, 4, 2)
 
@@ -943,6 +949,7 @@ class plot_ordination(ui_plot):
                 biolgroupmap[elem] = colors[colorpos]
                 colorpos += 1
 
+        plot_title = None
         if self.method == 'PCA':
             scores, loadings, expvar = ordination.run_pca(x, n_components)
             axis_labels = [f'PC{i + 1} ({100 * expvar[i]:.1f}%)' for i in range(2)]
@@ -952,11 +959,12 @@ class plot_ordination(ui_plot):
         else:
             scores, expvar, stress = ordination.run_nmds(x, n_components)
             loadings = ordination.nmds_loading_proxy(x, scores)
-            print("NMDS stress: " + str(stress))
-            # Labeled distinctly from PCA/PLS-DA's: this is the variance of
-            # the embedded 2D NMDS coordinates, not of the original feature
-            # space (see ordination.run_nmds's docstring).
-            axis_labels = [f'NMDS{i + 1} ({100 * expvar[i]:.1f}% of embedding variance)' for i in range(2)]
+            # NMDS doesn't canonically report percent-variance-explained the
+            # way PCA/PLS-DA do (it's a rank-based embedding, not a linear
+            # decomposition of the feature space) -- stress is the
+            # conventional thing to report for NMDS instead.
+            axis_labels = ['NMDS1', 'NMDS2']
+            plot_title = f'Stress: {stress:.4f}'
 
         self.loadings_df = loadings
         principalDf = scores.copy()
@@ -966,6 +974,9 @@ class plot_ordination(ui_plot):
             self._plot_loadings(parent, loadings, axis_labels)
         else:
             self._plot_scores(parent, principalDf, biolgroupmap, axis_labels)
+
+        if plot_title:
+            parent.ax[self.currplt].set_title(plot_title, fontsize=10)
 
         parent.fig[self.currplt].subplots_adjust(left=.1, right=.9, bottom=0.1, top=0.9, hspace=0.2, wspace=0.2)
         parent.canvas[self.currplt].draw()
@@ -1016,7 +1027,22 @@ class plot_ordination(ui_plot):
         make the default cut is still visible on demand.
         """
         always_include = [parent.pickedfeature] if getattr(parent, 'pickedfeature', '') else []
-        subset = ordination.top_loadings(loadings, n=25, always_include=always_include)
+        # Rank by magnitude within the 2 displayed components only, not the
+        # full (up to 10-component) loadings -- a feature could rank in the
+        # overall top-25 purely from a large contribution to some other,
+        # unplotted component while barely showing up here, displacing a
+        # feature that's actually prominent in this 2D view.
+        subset = ordination.top_loadings(loadings.iloc[:, :2], n=25, always_include=always_include)
+
+        # ax.annotate()'s arrows don't reliably drive matplotlib's autoscale
+        # the way ax.scatter()/ax.plot() do (confirmed empirically: points
+        # can end up outside the auto-picked view limits), so the axis
+        # range is set explicitly here instead of relying on autoscale.
+        # Symmetric around 0 since loadings/correlations are naturally
+        # origin-centered (a biplot convention).
+        limit = subset.iloc[:, :2].abs().values.max() * 1.2 if len(subset) else 1.0
+        parent.ax[self.currplt].set_xlim(-limit, limit)
+        parent.ax[self.currplt].set_ylim(-limit, limit)
 
         for feature, row in subset.iterrows():
             xcoord, ycoord = row.iloc[0], row.iloc[1]
