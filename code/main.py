@@ -12,11 +12,10 @@ pd.options.mode.chained_assignment = None  # default='warn'
 import time
 import string
 
-import platform
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QMainWindow, QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
-from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
-from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
+from PyQt5.QtWidgets import QMainWindow, QSizeGrip
+from PyQt5.QtCore import QObject, Qt
+from PyQt5.QtGui import QPixmap
 from pathlib import Path
 
 # Install/verify non-stock dependencies (epam.indigo, UpSetPlot, squarify)
@@ -34,7 +33,7 @@ from ui_functions import *
 import files
 
 from MSFaST import run_MSFaST, analysis_parameters
-from groupsets import GroupSet, GroupSetModel, build_query_dict
+from groupsets import GroupSetModel, build_query_dict
 from plotslots import PlotSlotRegistry
 from paramfields import save_checkbox_fields
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
@@ -75,6 +74,8 @@ Check if low_memory=False increases ram usage for average grps?
 #TODO#
 - in source spectra viewer in spectrum details tab plot with preexisting in source fragment deconvolution algoirthm
 - clean up import sections and general code for better maintability and good syntax/standards
+    ~main.py's own import section done (dead PyQt5/stdlib/groupsets imports removed,
+    verified unused via pyflakes + grep, no behavior change); other files not yet swept
 - do overall data quality score, AUC on CV plot or something, may be present in a different form already
 - standardize method and class names
 - add terminal output with current line to status bar instead of just static status messages, perhaps with expand button to show full terminal output
@@ -82,7 +83,6 @@ Check if low_memory=False increases ram usage for average grps?
 - fix up analysisinfo file output with better and more useful log ingo
 - add other ordination options like pca, pls-da, etc etc
 - add custom keyword arguments for each plot to make calling them easier
-- add runcheck before searching when switching to search tab if not present
 - make it so groups can be reordered in the groupsets widgets?
 - consider if indexing and feature highly functions in plot options have any easy wins for optimization or disk use. (prob not)
 - make goto buttons just one class and lambda an index for the stacked widgets

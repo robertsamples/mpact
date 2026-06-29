@@ -211,6 +211,8 @@ class UIFunctions(MainWindow):
             self.dbsearchdone = True
             stop_functime('dbsearch complete')
             reset_runtime()
+        elif not self.analysisrun:
+            self.error('Run an analysis before searching.')
             
     #plotbar functions
     def goto_review(self):
