@@ -100,6 +100,53 @@ def load_ordination_matrix(file, raw_msdata_header, collapse_replicates):
     return x, biolgroup
 
 
+def replicate_label_components(raw_msdata_header):
+    """Derive (Biolgroup, BioRep#, TechRep#) for every Injection, for
+    building short ``biolgroupname_b<BioRep>_s<TechRep>``-style display
+    labels as an alternative to raw (sometimes long/uninformative) file
+    names -- used by the dendrogram tab's "Use Sample/Group Names" toggle.
+
+    BioRep# is the 1-based rank of an Injection's Sample among all distinct
+    Samples sharing the same Biolgroup (first-seen order in the header);
+    TechRep# is the 1-based rank of the Injection among all Injections
+    sharing the same Sample (first-seen order). Both are always assigned
+    starting at 1, so a Biolgroup with only one Sample still gets "_b1", and
+    a Sample with only one Injection still gets "_s1" -- there's no minimum-
+    replicate-count special case to handle.
+
+    Args:
+        raw_msdata_header: the peak table's 3 header rows, read raw
+            (``header=None, index_col=[0,1,2]).iloc[:3,:].transpose()``) --
+            same format ``load_ordination_matrix`` takes.
+
+    Returns:
+        DataFrame indexed by Injection, columns ``['Biolgroup', 'Sample',
+        'BioRep', 'TechRep']`` (``BioRep``/``TechRep`` are 1-based ints).
+    """
+    header = raw_msdata_header.copy()
+    header.columns = ['Biolgroup', 'Sample', 'Injection']
+
+    samples_seen_per_biolgroup = {}
+    biorep_of_sample = {}
+    for _, row in header.drop_duplicates('Sample').iterrows():
+        biolgroup, sample = row['Biolgroup'], row['Sample']
+        samples_seen_per_biolgroup.setdefault(biolgroup, [])
+        samples_seen_per_biolgroup[biolgroup].append(sample)
+        biorep_of_sample[sample] = len(samples_seen_per_biolgroup[biolgroup])
+
+    injections_seen_per_sample = {}
+    techrep_of_injection = {}
+    for _, row in header.iterrows():
+        sample, injection = row['Sample'], row['Injection']
+        injections_seen_per_sample.setdefault(sample, [])
+        injections_seen_per_sample[sample].append(injection)
+        techrep_of_injection[injection] = len(injections_seen_per_sample[sample])
+
+    header['BioRep'] = header['Sample'].map(biorep_of_sample)
+    header['TechRep'] = header['Injection'].map(techrep_of_injection)
+    return header.set_index('Injection')[['Biolgroup', 'Sample', 'BioRep', 'TechRep']]
+
+
 def autoscale(x):
     """Mean-center and scale each feature to unit variance ("UV-scaling" /
     "autoscaling" in chemometrics terminology -- the standard pre-treatment

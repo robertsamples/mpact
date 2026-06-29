@@ -282,9 +282,6 @@ def plot_dendrogram(linkage_matrix, pvalues, axis, labels=None, link_color_func=
     y = {i: j[1] for i, j in enumerate(ycoord)}
     pos = node_positions(y, x)
 
-
-    plt.figure(figsize=(12, 8))
-    plt.tight_layout()
     set_link_color_palette(['c', 'g'])
     # link_color_func, when given, takes priority over color_threshold/
     # above_threshold_color (scipy's own precedence rule) -- that's how the
@@ -295,25 +292,46 @@ def plot_dendrogram(linkage_matrix, pvalues, axis, labels=None, link_color_func=
                    link_color_func=link_color_func)
     maxval = max(y.values())
     ax = axis
-    for node, (x, y) in pos.items(): #modifications added to scale y axis label shifts
+
+    # AU/BP labels used to be positioned with a fixed x-shift in icoord
+    # units (e.g. "x-7"). icoord spacing is always 10 units per leaf
+    # regardless of leaf count, but the AXES' actual pixel width is not --
+    # with more leaves squeezed into the same plot width, each icoord unit
+    # maps to fewer pixels, so a fixed icoord offset shrinks to a fixed
+    # *fraction* of leaf spacing but an ever-shrinking number of *pixels*,
+    # eventually overlapping (e.g. "AU"/"BP" merging into "AUBP" once there
+    # are enough leaves). Anchoring with ha='right'/'left' plus a constant
+    # offset in POINTS (not data units) keeps a fixed pixel gap regardless
+    # of leaf count or icoord scale -- no more digit-width-dependent x-shift
+    # hack for AU values of 100 vs not. Per-node fontsize is similarly
+    # scaled down as leaf count grows, so neighbouring nodes' labels (which
+    # do have a fixed minimum icoord-and-therefore-pixel separation) don't
+    # run into each other either.
+    n_leaves = len(d['ivl'])
+    value_fontsize = max(5, min(8, 140 / n_leaves))
+    header_fontsize = value_fontsize + 3
+    gap_points = 2
+
+    for node, (nx, ny) in pos.items(): #modifications added to scale y axis label shifts
+        y_offset = ny + maxval / 200
 
         if node == (len(pos.items())-1):
-            ax.text(x-6, y+maxval/200, 'AU', fontsize=11, fontweight='bold',
-                    color='purple')
-            ax.text(x+1, y+maxval/200, 'BP', fontsize=11, fontweight='bold',
-                    color='black')
+            ax.annotate('AU', xy=(nx, y_offset), xytext=(-gap_points, 0),
+                        textcoords='offset points', ha='right', va='bottom',
+                        fontsize=header_fontsize, fontweight='bold', color='purple')
+            ax.annotate('BP', xy=(nx, y_offset), xytext=(gap_points, 0),
+                        textcoords='offset points', ha='left', va='bottom',
+                        fontsize=header_fontsize, fontweight='bold', color='black')
         else:
-            if pvalues[node][0]*100 == 100:
-                ax.text(x-10, y+maxval/200, f' {pvalues[node][0]*100:.0f}', fontsize=8,
-                        color='purple', fontweight='bold')
-                ax.text(x+1, y+maxval/200, f'{pvalues[node][1]*100:.0f}', fontsize=8,
-                        color='black', fontweight='bold')
-            else:
-                ax.text(x-7, y+maxval/200, f' {pvalues[node][0]*100:.0f}', fontsize=8,
-                        color='purple')
-                ax.text(x+1, y+maxval/200, f'{pvalues[node][1]*100:.0f}', fontsize=8,
-                        color='black')
-#    plt.savefig('dendrogram.pdf')
+            au_significant = pvalues[node][0] * 100 == 100
+            ax.annotate(f'{pvalues[node][0]*100:.0f}', xy=(nx, y_offset), xytext=(-gap_points, 0),
+                        textcoords='offset points', ha='right', va='bottom',
+                        fontsize=value_fontsize, color='purple',
+                        fontweight='bold' if au_significant else 'normal')
+            ax.annotate(f'{pvalues[node][1]*100:.0f}', xy=(nx, y_offset), xytext=(gap_points, 0),
+                        textcoords='offset points', ha='left', va='bottom',
+                        fontsize=value_fontsize, color='black',
+                        fontweight='bold' if au_significant else 'normal')
 
 
 def node_positions(x, y):

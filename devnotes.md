@@ -291,8 +291,10 @@ only handles the combo boxes, axes, and pick events.
 
 ## Dendrogram purity coloring (`plotting.plot_dendrogram`, `clusterpurity.py`)
 
-The dendrogram tab has two combo-box switchers (same runtime-widget-
-substitution pattern as `plot_ordination`'s method/view bar):
+The dendrogram tab has a switcher bar (same runtime-widget-substitution
+pattern as `plot_ordination`'s method/view bar) with two combo boxes (View,
+Color) and two checkboxes (Bootstrap, Use Sample/Group Names -- both
+documented further down, formerly/newly local to this tab respectively):
 
 - **View** — which leaves to cluster:
   - **Technical Replicates** (default — matches the tab's original
@@ -408,6 +410,44 @@ Both views' purity math is the same Qt-free linkage-traversal logic in
   `freeze_support()` specifically). The real app is fine — `main.py` already
   guards its entry point — but throwaway test scripts need the same
   discipline.
+- **"Use Sample/Group Names" leaf labels** (`ordination.replicate_label_components()`):
+  swaps the raw file/injection names for `<Biolgroup>_b<BioRep#>_s<TechRep#>`
+  (Technical Replicates view) or `<Biolgroup>_b<BioRep#>` (Biological
+  Replicates view -- no TechRep#, since that view already collapsed
+  technical replicates), for when the real file names are long or
+  uninformative. BioRep# is the 1-based rank of a Sample within its
+  Biolgroup (first-seen order); TechRep# is the 1-based rank of an
+  Injection within its Sample -- both numbers are assigned unconditionally,
+  so a Biolgroup with only one Sample still shows `_b1` and a Sample with
+  only one Injection still shows `_s1` (no special-casing needed for either
+  edge case, verified in `test_ordination.py`). This only changes the
+  `labels=` argument passed to `dendrogram()`/`PvClust.plot()` -- the
+  underlying data orientation, clustering, and purity-coloring lookups all
+  still key off the raw names internally.
+- **AU/BP label scaling, regardless of leaf count**: the bootstrap
+  dendrogram's per-node AU/BP annotations used to be positioned with a
+  fixed x-shift in *icoord* units (e.g. `x-7`, with a separate `x-10` for
+  3-digit "100" values). icoord spacing is always 10 units per leaf no
+  matter how many leaves there are, but the axes' actual pixel width isn't
+  -- with more leaves squeezed into the same plot width, each icoord unit
+  maps to fewer and fewer pixels, so that fixed icoord offset shrinks to an
+  ever-smaller *pixel* gap, eventually merging "AU"/"BP" into "AUBP" (and
+  every node's AU/BP pair into illegible overlapping text) once there are
+  enough leaves. Fixed by switching to `ax.annotate(..., xytext=(±2, 0),
+  textcoords='offset points', ha='right'/'left')`: a constant gap in
+  *points* (real pixels-at-a-given-DPI) stays a constant gap regardless of
+  icoord scale or leaf count, and `ha='right'`/`ha='left'` anchoring makes
+  the old digit-width-dependent branching (-7 vs -10) unnecessary entirely.
+  Per-node fontsize is also now scaled down as leaf count grows
+  (`max(5, min(8, 140 / n_leaves))`) so neighbouring *different* nodes'
+  labels -- which do have a fixed minimum icoord (and therefore pixel)
+  separation -- don't run into each other either. Verified by rendering
+  both a 6-leaf and a 27-leaf synthetic tree (matching the real 9-sample
+  x3-techrep dataset's leaf count) and visually confirming no overlap in
+  either. Also removed a `plt.figure(figsize=(12,8))`/`plt.tight_layout()`
+  pair that created and immediately abandoned an unused Figure on every
+  call -- it never affected the actual target `axis` and was a real (if
+  small) per-redraw resource leak.
 
 ## Treemap / upset plot canvases (`plotting.plot_treemap`, `plotting.plot_upset`)
 

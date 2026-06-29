@@ -12,8 +12,8 @@ import pandas as pd
 import pytest
 
 from ordination import (
-    load_ordination_matrix, nmds_loading_proxy, run_nmds, run_pca, run_plsda,
-    top_loadings,
+    load_ordination_matrix, nmds_loading_proxy, replicate_label_components,
+    run_nmds, run_pca, run_plsda, top_loadings,
 )
 
 
@@ -74,6 +74,42 @@ def test_collapsed_values_are_the_mean_of_their_technical_replicates(tmp_path, m
     # S1's feat1 replicates are 10, 12, 11 -> mean 11.
     s1_row = x.loc[x.index.str.contains('S1') & ~x.index.str.contains('S1b')]
     assert s1_row['feat1'].iloc[0] == pytest.approx(11.0)
+
+
+# --------------------------------------------------------------------------- #
+# replicate_label_components
+# --------------------------------------------------------------------------- #
+
+def test_replicate_label_components_numbers_bio_and_tech_reps(tmp_path):
+    # Reuses the same fixture as the collapse tests: groupA has 2 Samples
+    # (S1, S1b -- BioRep 1 and 2), groupB has 1 Sample (S2 -- BioRep 1, the
+    # "only one biological replicate" edge case), every Sample has 3
+    # Injections (TechRep 1-3).
+    path = tmp_path / 'example_filtered.csv'
+    _write_synthetic_filtered_csv(path)
+    components = replicate_label_components(_raw_header(path))
+
+    assert components.loc['inj1', ['Biolgroup', 'Sample', 'BioRep', 'TechRep']].tolist() == ['groupA', 'S1', 1, 1]
+    assert components.loc['inj3', ['Biolgroup', 'Sample', 'BioRep', 'TechRep']].tolist() == ['groupA', 'S1', 1, 3]
+    assert components.loc['inj4', ['Biolgroup', 'Sample', 'BioRep', 'TechRep']].tolist() == ['groupA', 'S1b', 2, 1]
+    # groupB has only one Sample -- still BioRep 1, not skipped/blank.
+    assert components.loc['inj7', ['Biolgroup', 'Sample', 'BioRep', 'TechRep']].tolist() == ['groupB', 'S2', 1, 1]
+
+
+def test_replicate_label_components_single_technical_replicate(tmp_path):
+    # Edge case: a Sample with only one Injection should still get
+    # TechRep=1, not be skipped or raise.
+    path = tmp_path / 'single_techrep_filtered.csv'
+    with open(path, 'w') as f:
+        f.write(',,,groupA,groupA,groupB\n')
+        f.write(',,,S1,S1b,S2\n')
+        f.write('Compound,m/z,Retention time (min),inj1,inj2,inj3\n')
+        f.write('feat1,100.0,1.0,10,30,50\n')
+    components = replicate_label_components(_raw_header(path))
+
+    assert components.loc['inj1', ['Sample', 'BioRep', 'TechRep']].tolist() == ['S1', 1, 1]
+    assert components.loc['inj2', ['Sample', 'BioRep', 'TechRep']].tolist() == ['S1b', 2, 1]
+    assert components.loc['inj3', ['Sample', 'BioRep', 'TechRep']].tolist() == ['S2', 1, 1]
 
 
 # --------------------------------------------------------------------------- #

@@ -826,6 +826,13 @@ class plot_dendrogram(ui_plot):
     switcher bar (formerly the plot-config dialog's global "Bootstrap
     Analysis" checkbox -- moved here since it only ever applied to this
     plot). The purity-coloring math lives in the Qt-free clusterpurity.py.
+
+    A "Use Sample/Group Names" checkbox swaps the leaf labels from the raw
+    file/injection names (which can be long or uninformative) to
+    ``<Biolgroup>_b<BioRep#>_s<TechRep#>`` (Technical Replicates view) or
+    ``<Biolgroup>_b<BioRep#>`` (Biological Replicates view, no TechRep#
+    since replicates are already collapsed) -- see
+    ``ordination.replicate_label_components()``.
     """
 
     VIEWS = ('Technical Replicates', 'Biological Replicates')
@@ -844,6 +851,7 @@ class plot_dendrogram(ui_plot):
         self.view = 'Technical Replicates'
         self.color_mode = 'Purity'
         self.bootstrap = True
+        self.use_sample_names = False
         self._build_switcher_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
 
@@ -872,11 +880,17 @@ class plot_dendrogram(ui_plot):
         bootstrap_check.setChecked(self.bootstrap)
         bootstrap_check.toggled.connect(self._on_bootstrap_toggled)
         layout.addWidget(bootstrap_check)
+
+        use_names_check = QtWidgets.QCheckBox('Use Sample/Group Names')
+        use_names_check.setChecked(self.use_sample_names)
+        use_names_check.toggled.connect(self._on_use_sample_names_toggled)
+        layout.addWidget(use_names_check)
         layout.addStretch()
 
         self.view_combo = view_combo
         self.color_combo = color_combo
         self.bootstrap_check = bootstrap_check
+        self.use_names_check = use_names_check
         parent.pltlayout[currplt].insertWidget(0, bar)
 
     def _on_view_changed(self, view):
@@ -890,6 +904,22 @@ class plot_dendrogram(ui_plot):
     def _on_bootstrap_toggled(self, checked):
         self.bootstrap = checked
         self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_use_sample_names_toggled(self, checked):
+        self.use_sample_names = checked
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _display_labels(self, raw_header, textlabels):
+        """Build short ``Biolgroup_b#[_s#]`` leaf labels in place of the raw
+        file/injection names, when "Use Sample/Group Names" is checked."""
+        components = ordination.replicate_label_components(raw_header)
+        if self.view == 'Biological Replicates':
+            per_sample = components.drop_duplicates('Sample').set_index('Sample')
+            return [f"{per_sample.loc[sample, 'Biolgroup']}_b{per_sample.loc[sample, 'BioRep']}" for sample in textlabels]
+        return [
+            f"{components.loc[injection, 'Biolgroup']}_b{components.loc[injection, 'BioRep']}_s{components.loc[injection, 'TechRep']}"
+            for injection in textlabels
+        ]
 
     def plot(self, parent, file, filtereddfs, groupsets):
         self._last_file = file
@@ -945,10 +975,12 @@ class plot_dendrogram(ui_plot):
         else:
             link_color_func = None  # plain black dendrogram, scipy's own default
 
+        display_labels = self._display_labels(raw_header, textlabels) if self.use_sample_names else textlabels
+
         if self.bootstrap:
-            dend = pv.plot(parent.ax[self.currplt], labels=textlabels, link_color_func=link_color_func)
+            dend = pv.plot(parent.ax[self.currplt], labels=display_labels, link_color_func=link_color_func)
         else:
-            dend = shc.dendrogram(Z, ax=parent.ax[self.currplt], leaf_rotation=90, color_threshold=0, above_threshold_color='black', link_color_func=link_color_func, labels=textlabels)  # default leaf label size 16
+            dend = shc.dendrogram(Z, ax=parent.ax[self.currplt], leaf_rotation=90, color_threshold=0, above_threshold_color='black', link_color_func=link_color_func, labels=display_labels)  # default leaf label size 16
 
         if self.color_mode == 'Purity':
             n_pure, n_total = clusterpurity.purity_summary(Z, leaf_labels)
