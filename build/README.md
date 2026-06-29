@@ -34,7 +34,7 @@ files).
   (extract-then-run vs. run-in-place). Onedir keeps those files persistently
   next to the exe, matching how `run.bat` already works (it `cd`s into
   `code\` before launching, for the same cwd-relative-paths reason -- see
-  CLAUDE.md).
+  devnotes.md).
 - **`contents_directory='.'` on the `EXE(...)` call in `mpact.spec`.**
   PyInstaller 6.0 changed the onedir default to nest everything except the
   exe itself under `dist/MPACT/_internal/`, to keep the top-level folder
@@ -46,7 +46,7 @@ files).
 ## Dependency notes specific to this build
 
 - `requirements.txt` deliberately does **not** carry the `numpy<2` cap that
-  `importdependencies.py` / CLAUDE.md document for the Anaconda dev env. That
+  `importdependencies.py` / devnotes.md document for the Anaconda dev env. That
   cap exists only to protect conda-compiled pandas/matplotlib/scipy binaries
   built against NumPy 1.x's ABI -- it doesn't apply to a clean pip venv, where
   every wheel is built against NumPy 2.x from the start. Capping it here
@@ -92,6 +92,6 @@ commonly hits, not application logic bugs.
 ## Linux / Mac builds
 
 Not yet built or tested on those platforms. See the "Portable builds for
-Linux / Mac" section in the repo-root `CLAUDE.md` for what's expected to
+Linux / Mac" section in the repo-root `devnotes.md` for what's expected to
 carry over from this Windows build vs. what would need platform-specific
 work, for whoever picks this up next.
