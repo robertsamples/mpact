@@ -25,8 +25,10 @@ shows. If you're contributing to MPACT itself, see [Development](development.md)
     This documentation is adapted from the original MPACT user guide
     (2022) and updated to reflect the current codebase (mid-2026),
     including the import/export translator framework for MZmine/MS-DIAL/
-    Metaboscape peak tables, the background-threaded analysis run, and the
-    groupset (Plot Feature Sets) editor. Some screenshots referenced in
-    the original guide have not been re-captured yet — see
-    [Development](development.md) if you'd like to contribute updated
-    images.
+    Metaboscape peak tables, the background-threaded analysis run, the
+    groupset (Plot Feature Sets) editor, the multivariate ordination
+    rework (PCA/NMDS/PLS-DA with scores and loadings views), and the
+    dendrogram rework (purity coloring, view/bootstrap/label switchers).
+    Some screenshots referenced in the original guide have not been
+    re-captured yet — see [Development](development.md) if you'd like to
+    contribute updated images.

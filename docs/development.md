@@ -15,6 +15,9 @@ in the repo root.
 - **Hand-written app code:** `main.py` (`MainWindow`, run/save/load,
   database search), `plotting.py` (plot classes), `filter.py`, `stats.py`,
   `MSFaST.py` (analysis driver), `pvclust.py` (bootstrap dendrogram),
+  `ordination.py` (Qt-free PCA/NMDS/PLS-DA backend),
+  `clusterpurity.py` (dendrogram branch-purity logic),
+  `csvcache.py` (cached CSV reads for the ordination data path),
   `translators.py` (import/export framework), `mzmineimport.py` (format
   conversion), `getfragdb.py`, `mspwriter.py`.
 - **Canonical peak table** format (what `MSFaST` consumes internally;
@@ -59,9 +62,9 @@ Headless unit tests live in `code/tests/` (pure-logic only — no Qt):
 python -m pytest code/tests -q
 ```
 
-Covers `filter`, `stats`, `importdependencies`, `translators`, and
-`groupsets`. Add tests here for any new Qt-free logic. GUI behaviour can't
-be tested headlessly — verify it by running the app.
+Covers `filter`, `stats`, `importdependencies`, `translators`,
+`groupsets`, and `ordination`. Add tests here for any new Qt-free logic.
+GUI behaviour can't be tested headlessly — verify it by running the app.
 
 ## Conventions
 
