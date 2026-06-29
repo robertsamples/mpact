@@ -197,20 +197,42 @@ class SearchTreePanel:
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(2)
 
-        filter_bar = QtWidgets.QWidget(container)
-        filter_bar.setStyleSheet(_FILTER_BAR_STYLE)
-        self._filter_layout = QtWidgets.QHBoxLayout(filter_bar)
-        self._filter_layout.setContentsMargins(4, 2, 4, 2)
+        # A single-line toggle rather than always showing all 8 filters at
+        # once -- one text box, five min/max range pairs, and two category
+        # dropdowns doesn't fit comfortably side by side in a narrow side
+        # panel. Collapsed by default so it doesn't change anything for
+        # someone who never needs to filter.
+        toggle_row = QtWidgets.QWidget(container)
+        toggle_row.setStyleSheet(_FILTER_BAR_STYLE)
+        toggle_layout = QtWidgets.QHBoxLayout(toggle_row)
+        toggle_layout.setContentsMargins(4, 2, 4, 2)
+        self.toggle_button = QtWidgets.QToolButton(toggle_row)
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setText('Filters ▸')
+        self.toggle_button.toggled.connect(self._on_toggle_filters)
+        toggle_layout.addWidget(self.toggle_button)
+        toggle_layout.addStretch()
+
+        self.filter_panel = QtWidgets.QWidget(container)
+        self.filter_panel.setStyleSheet(_FILTER_BAR_STYLE)
+        self._filter_layout = QtWidgets.QFormLayout(self.filter_panel)
+        self._filter_layout.setContentsMargins(6, 4, 6, 4)
         self._filter_layout.setSpacing(4)
+        self.filter_panel.setVisible(False)
 
         self._category_buttons = {}
         for column in range(len(COLUMNS)):
-            self._filter_layout.addWidget(self._build_filter_widget(column))
+            self._filter_layout.addRow(COLUMNS[column], self._build_filter_widget(column))
 
-        outer.addWidget(filter_bar)
+        outer.addWidget(toggle_row)
+        outer.addWidget(self.filter_panel)
         outer.addWidget(self.view)
 
         layout.insertWidget(index, container)
+
+    def _on_toggle_filters(self, checked):
+        self.filter_panel.setVisible(checked)
+        self.toggle_button.setText('Filters ▾' if checked else 'Filters ▸')
 
     def _build_filter_widget(self, column):
         if column in TEXT_COLUMNS:
@@ -221,7 +243,7 @@ class SearchTreePanel:
 
     def _build_text_filter(self, column):
         edit = QtWidgets.QLineEdit()
-        edit.setPlaceholderText(COLUMNS[column])
+        edit.setPlaceholderText('contains…')
         edit.setClearButtonEnabled(True)
         edit.textChanged.connect(
             lambda text, c=column: self.proxy.set_filter(c, TextFilter(text) if text else None))
@@ -231,16 +253,13 @@ class SearchTreePanel:
         box = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(4)
 
-        label = QtWidgets.QLabel(COLUMNS[column])
         min_edit = QtWidgets.QLineEdit()
         min_edit.setPlaceholderText('min')
-        min_edit.setMaximumWidth(60)
         min_edit.setValidator(QtGui.QDoubleValidator())
         max_edit = QtWidgets.QLineEdit()
         max_edit.setPlaceholderText('max')
-        max_edit.setMaximumWidth(60)
         max_edit.setValidator(QtGui.QDoubleValidator())
 
         def update_filter(*_args):
@@ -252,14 +271,13 @@ class SearchTreePanel:
         min_edit.textChanged.connect(update_filter)
         max_edit.textChanged.connect(update_filter)
 
-        layout.addWidget(label)
         layout.addWidget(min_edit)
         layout.addWidget(max_edit)
         return box
 
     def _build_category_filter(self, column):
         button = QtWidgets.QToolButton()
-        button.setText(COLUMNS[column] + ' ▾')
+        button.setText('Select…')
         button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         menu = QtWidgets.QMenu(button)
         button.setMenu(menu)
