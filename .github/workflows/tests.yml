@@ -19,7 +19,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install "numpy<2" pandas scipy tqdm pytest
+      # PyQt5 wheels bundle their own Qt libs (including the "offscreen"
+      # platform plugin conftest.py selects, so no real display/Xvfb is
+      # needed), but on a minimal Ubuntu image they still dynamically link
+      # against a few system libraries the base image doesn't ship.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - run: pip install "numpy<2" pandas scipy tqdm pytest PyQt5
       - run: python -m pytest code/tests -v
 
   lint:

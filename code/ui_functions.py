@@ -157,7 +157,7 @@ class UIFunctions(MainWindow):
         self.ftrdialog.setWindowFlag(QtCore.Qt.FramelessWindowHint)
         self.ftrdialog.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
         self.ftrdialog.ui.treeWidget.hideColumn(5)
-        self.ui.treeWidget.hideColumn(5) #hide sets column for now
+        self.searchtree.view.hideColumn(5) #hide sets column for now
         self.ftrdialog.hide()
         self.ftrdialog.ui.btn_related.hide()
         

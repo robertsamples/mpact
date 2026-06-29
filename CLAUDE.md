@@ -58,6 +58,20 @@ that way. Required deps (gate startup): `epam.indigo`→`indigo`, `UpSetPlot`→
   core), `dbsearch.py` (`fulldbsearch()`'s NPAtlas ppm-window matching
   core). Each corresponding `MainWindow` method is now a thin wrapper:
   call the module function, then apply the result to widgets/`self`.
+- **Runtime widget substitution into a Designer placeholder** is an
+  established pattern here, not a one-off — `plotting.py` does it for every
+  matplotlib canvas (inserted into a Designer-created `QFrame`), and
+  `searchtree.py`'s `SearchTreePanel` does it for the feature-search tab's
+  tree: it removes `ui_main.py`'s Designer-created `QTreeWidget` from its
+  layout at runtime and inserts a real `QTreeView` + per-column filter bar
+  in the same slot. No generated file is edited; re-opening the `.ui` file
+  in Qt Designer would still show the old `QTreeWidget`, only the running
+  app uses the substitute. `SearchTreePanel`'s filter-matching rules
+  (per-column text/numeric-range/multi-select-category) live in the
+  Qt-free, unit-tested `treefilters.py`; `searchtree.py` is just the Qt
+  model/proxy/widget plumbing wired to it. `MainWindow.fillfttree()`/
+  `on_tree_item_selection_changed()` talk to `self.searchtree` (`set_rows()`/
+  `selected_compound()`) instead of `QTreeWidgetItem`s now.
 - **Canonical peak table** (what MPACT consumes; Progenesis = native): CSV, 3
   header rows; row 2 = `Compound,m/z,Retention time (min),<injections...>`;
   col0 = `RT_mz` id, col1 = m/z, col2 = RT. Rows 0–1 are overwritten by
@@ -86,15 +100,26 @@ import).
 
 ## Testing
 
-Headless unit tests in `code/tests/` (pure-logic only — no GUI). Run:
+Headless unit tests in `code/tests/` (mostly Qt-free logic, plus standalone
+Qt widget/model tests that don't import `main.py` — see below). Run:
 
 ```
 python -m pytest code/tests -q
 ```
 
-Covers `filter`, `stats`, `importdependencies`, `translators`, `groupsets`. Add
-tests here for any new Qt-free logic. GUI behaviour must be verified by running
-the app (can't be tested headlessly).
+Covers `filter`, `stats`, `importdependencies`, `translators`, `groupsets`,
+`searchtree`. Add tests here for any new Qt-free logic.
+
+`conftest.py` sets `QT_QPA_PLATFORM=offscreen` and provides a session-scoped
+`qapp` fixture: PyQt5 widgets/models/signals *can* be exercised headlessly via
+Qt's offscreen platform plugin, as long as the module under test doesn't
+import `main.py` (the documented `main`⇄`ui_functions` circular import is a
+separate, unrelated constraint and still applies — `main.py` itself still
+can't be imported standalone). `searchtree.py`'s tests are a real example:
+they construct an actual `QTreeWidget` in an actual layout and exercise the
+full runtime widget swap, not just the Qt-free filter logic underneath it.
+Full end-to-end GUI behaviour (anything that requires `main.py`/`MainWindow`)
+still must be verified by running the app.
 
 ## Groupsets (`groupsets.py`)
 
