@@ -128,6 +128,19 @@ def test_panel_removes_old_widget_and_inserts_view_in_same_slot(qapp):
     assert panel.view.parentWidget() is not None
 
 
+def test_panel_copies_the_old_widgets_stylesheet_onto_the_new_view(qapp):
+    """The new QTreeView is a different widget instance, so it doesn't
+    automatically inherit whatever Designer's setupUi() applied to the
+    widget it's replacing -- confirm it's carried across explicitly rather
+    than defaulting to unstyled (light-themed) widgets in a dark-themed app."""
+    host, layout, tree_widget = make_host_with_tree_widget()
+    tree_widget.setStyleSheet('QTreeView { background-color: rgb(50,50,50); }')
+
+    panel = SearchTreePanel(tree_widget)
+
+    assert panel.view.styleSheet() == 'QTreeView { background-color: rgb(50,50,50); }'
+
+
 def test_panel_set_rows_populates_the_view(qapp):
     host, layout, tree_widget = make_host_with_tree_widget()
     panel = SearchTreePanel(tree_widget)
