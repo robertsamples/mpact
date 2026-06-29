@@ -40,6 +40,7 @@ from paramfields import save_checkbox_fields
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 from biogroups import compute_biological_groups
 from dbsearch import search_npatlas
+from searchtree import SearchTreePanel
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
 
@@ -110,14 +111,6 @@ Check if low_memory=False increases ram usage for average grps?
     conditionals each time OR do it so that the appropriate columns are still 
     generated each time if filtering is off but they are always true
 '''
-
-class NumericalTreeWidgetItem(QtWidgets.QTreeWidgetItem):
-    def __lt__(self, other):
-        column = self.treeWidget().sortColumn() # the second column
-        try:
-            return float(self.text(column)) < float(other.text(column))
-        except ValueError: # fallback to alphabetical sorting if the text is not a number
-            return super().__lt__(other)
 
 class query:
     """Legacy groupset shape, kept only so old ``.mpct`` files (which pickle
@@ -293,7 +286,11 @@ class MainWindow(QMainWindow):
         self.highlight = self._plotslots.highlight
                 
         self.ui.btn_run.clicked.connect(self.run_analysis)
-        self.ui.treeWidget.itemSelectionChanged.connect(self.on_tree_item_selection_changed)
+        # Replaces the Designer-created QTreeWidget with a real QTreeView +
+        # per-column filter bar (searchtree.py) -- doesn't edit ui_main.py,
+        # see SearchTreePanel's docstring for how the runtime swap works.
+        self.searchtree = SearchTreePanel(self.ui.treeWidget)
+        self.searchtree.view.selectionModel().selectionChanged.connect(self.on_tree_item_selection_changed)
 
 
         def moveWindow(event):
@@ -609,35 +606,23 @@ class MainWindow(QMainWindow):
             index_col=None
         )
         iondict = iondict[iondict['hits'] >= 0]
-        self.ui.treeWidget.setSortingEnabled(True)
 
-        itemdict = {}
-        self.ui.treeWidget.clear()
-        for i, row in iondict.iterrows():
-            item = NumericalTreeWidgetItem([
-                row['Compound'],
-                str(round(row['m/z'], 4)),
-                str(round(row['Retention time (min)'], 3)),
-                str(int(row['max'])),
-                str(row['groups']),
-                str(row['groups']),
-                str(round(row['fc'], 2)),
-                str(int(row['hits']))
-            ])
-            itemdict[i] = item
-            self.ui.treeWidget.addTopLevelItem(item)
-        # Optionally expand all items
-        # self.ui.treeWidget.expandAll()
+        # Rows in searchtree.COLUMNS order (Compound, m/z, TR, Max, Sets,
+        # Groups, FC, Hits) -- raw values, not pre-formatted strings; the
+        # model formats numeric columns for display and keeps the raw value
+        # available for proper numeric sort/filter (see IonTableModel).
+        rows = [
+            (row['Compound'], row['m/z'], row['Retention time (min)'], row['max'],
+             row['groups'], row['groups'], row['fc'], row['hits'])
+            for _, row in iondict.iterrows()
+        ]
+        self.searchtree.set_rows(rows)
 
 
-    
+
     def on_tree_item_selection_changed(self):
-        selected_items = self.ui.treeWidget.selectedItems()
-        if selected_items:
-            item = selected_items[0]
-            # Get the name from the first column
-            name = item.text(0)
-            #print(f"Selection changed: {name}")
+        name = self.searchtree.selected_compound()
+        if name:
             # Call the method to highlight the feature
             self.highlight_feature(name)
 
