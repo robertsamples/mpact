@@ -14,8 +14,24 @@ This module is Qt-free and unit-tested (see ``tests/test_clusterpurity.py``).
 """
 
 
-def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='black'):
+def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='red', neutral_color='black'):
     """Build a ``link_color_func`` for ``scipy.cluster.hierarchy.dendrogram``.
+
+    Three-way coloring, not just pure-vs-not:
+
+    - ``true_color`` ("pure"/monophyletic): every leaf under this link
+      shares one label.
+    - ``false_color`` ("bridge"): this link is impure, but at least one of
+      its two children was itself pure (a single leaf counts as trivially
+      pure) -- this is the *specific* merge where a different label first
+      gets bridged in, i.e. exactly the "bridge sample"/"two groups meet
+      here" point.
+    - ``neutral_color``: this link is impure AND both children were already
+      impure -- i.e. it's just continuing an already-known mix further up
+      the tree, not new information. Without this third state, every
+      ancestor of a single bridge point would also render in
+      ``false_color``, painting most of the upper tree the "bad" color even
+      though only one merge actually caused it.
 
     Args:
         Z: linkage matrix (``scipy.cluster.hierarchy.linkage`` or
@@ -27,20 +43,26 @@ def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='blac
 
     Returns:
         callable: ``link_color_func(k)`` as expected by ``dendrogram``'s
-        ``link_color_func`` argument -- for link index ``k``
-        (``len(leaf_labels) <= k``), returns ``true_color`` if every leaf
-        descending from that link shares one label, else ``false_color``.
+        ``link_color_func`` argument.
     """
     n_leaves = len(leaf_labels)
     leaf_label_sets = {i: {leaf_labels[i]} for i in range(n_leaves)}
+    is_pure = {i: True for i in range(n_leaves)}  # every leaf is trivially pure
     colors = {}
     for i, row in enumerate(Z):
         a, b = int(row[0]), int(row[1])
         node_id = n_leaves + i
         merged = leaf_label_sets[a] | leaf_label_sets[b]
         leaf_label_sets[node_id] = merged
-        colors[node_id] = true_color if len(merged) == 1 else false_color
-    return lambda k: colors.get(k, false_color)
+        pure = len(merged) == 1
+        is_pure[node_id] = pure
+        if pure:
+            colors[node_id] = true_color
+        elif is_pure[a] or is_pure[b]:
+            colors[node_id] = false_color
+        else:
+            colors[node_id] = neutral_color
+    return lambda k: colors.get(k, neutral_color)
 
 
 def purity_summary(Z, leaf_labels):

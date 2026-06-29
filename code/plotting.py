@@ -822,9 +822,10 @@ class plot_dendrogram(ui_plot):
       tab's original (pre-purity-coloring) appearance.
 
     Either view/coloring combination can be regular or bootstrapped
-    (PvClust), depending on parent.analysis_paramsgui.bootstrap, same as
-    before this rework. The purity-coloring math lives in the Qt-free
-    clusterpurity.py.
+    (PvClust) depending on the "Bootstrap" checkbox in this tab's own
+    switcher bar (formerly the plot-config dialog's global "Bootstrap
+    Analysis" checkbox -- moved here since it only ever applied to this
+    plot). The purity-coloring math lives in the Qt-free clusterpurity.py.
     """
 
     VIEWS = ('Technical Replicates', 'Biological Replicates')
@@ -836,9 +837,13 @@ class plot_dendrogram(ui_plot):
         self.currplt = currplt
         # Defaults match the plot's previous (injection-level, uncolored)
         # behaviour exactly, so existing sessions see no change until they
-        # explicitly switch the new controls.
+        # explicitly switch the new controls. ``bootstrap`` defaults to True
+        # to match the checked-on-startup state the old global checkbox was
+        # forced to in ui_functions.py (its Designer default was actually
+        # False, overridden at runtime -- True is what users actually saw).
         self.view = 'Technical Replicates'
         self.color_mode = 'Purity'
+        self.bootstrap = True
         self._build_switcher_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
 
@@ -862,10 +867,16 @@ class plot_dendrogram(ui_plot):
         color_combo.setCurrentText(self.color_mode)
         color_combo.currentTextChanged.connect(self._on_color_mode_changed)
         layout.addWidget(color_combo)
+
+        bootstrap_check = QtWidgets.QCheckBox('Bootstrap')
+        bootstrap_check.setChecked(self.bootstrap)
+        bootstrap_check.toggled.connect(self._on_bootstrap_toggled)
+        layout.addWidget(bootstrap_check)
         layout.addStretch()
 
         self.view_combo = view_combo
         self.color_combo = color_combo
+        self.bootstrap_check = bootstrap_check
         parent.pltlayout[currplt].insertWidget(0, bar)
 
     def _on_view_changed(self, view):
@@ -874,6 +885,10 @@ class plot_dendrogram(ui_plot):
 
     def _on_color_mode_changed(self, color_mode):
         self.color_mode = color_mode
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_bootstrap_toggled(self, checked):
+        self.bootstrap = checked
         self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
 
     def plot(self, parent, file, filtereddfs, groupsets):
@@ -915,7 +930,7 @@ class plot_dendrogram(ui_plot):
             data_for_pvclust = data_scaled
             purity_noun = "samples' replicates clustered together"
 
-        if parent.analysis_paramsgui.bootstrap:
+        if self.bootstrap:
             # bootstrap dendrogram
             pv = PvClust(data_for_pvclust, method="ward", metric="euclidean", nboot=1000, parallel=True)
             Z = pv.linkage_matrix
@@ -930,7 +945,7 @@ class plot_dendrogram(ui_plot):
         else:
             link_color_func = None  # plain black dendrogram, scipy's own default
 
-        if parent.analysis_paramsgui.bootstrap:
+        if self.bootstrap:
             dend = pv.plot(parent.ax[self.currplt], labels=textlabels, link_color_func=link_color_func)
         else:
             dend = shc.dendrogram(Z, ax=parent.ax[self.currplt], leaf_rotation=90, color_threshold=0, above_threshold_color='black', link_color_func=link_color_func, labels=textlabels)  # default leaf label size 16
@@ -983,6 +998,10 @@ class plot_ordination(ui_plot):
     The actual math lives in the Qt-free ``ordination.py`` (PCA/NMDS/PLS-DA,
     technical-replicate collapsing, top-N loadings selection); this class is
     just the Qt plumbing and rendering on top of it.
+
+    The switcher bar also has a "Collapse Replicates" checkbox (formerly the
+    plot-config dialog's global "Collapse Technical Replicates" checkbox --
+    moved here since it only ever applied to this plot).
     """
 
     METHODS = ('NMDS', 'PCA', 'PLS-DA')
@@ -994,9 +1013,12 @@ class plot_ordination(ui_plot):
         self.currplt = currplt
         # Defaults match the plot's previous (NMDS-only, scores-only)
         # behaviour exactly, so existing sessions see no change until they
-        # explicitly switch the new controls.
+        # explicitly switch the new controls. ``collapse_replicates``
+        # defaults to True, matching the old global checkbox's Designer
+        # default.
         self.method = 'NMDS'
         self.view = 'Scores'
+        self.collapse_replicates = True
         self.loadings_df = None
         self._build_switcher_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
@@ -1021,10 +1043,16 @@ class plot_ordination(ui_plot):
         view_combo.setCurrentText(self.view)
         view_combo.currentTextChanged.connect(self._on_view_changed)
         layout.addWidget(view_combo)
+
+        collapse_check = QtWidgets.QCheckBox('Collapse Replicates')
+        collapse_check.setChecked(self.collapse_replicates)
+        collapse_check.toggled.connect(self._on_collapse_replicates_toggled)
+        layout.addWidget(collapse_check)
         layout.addStretch()
 
         self.method_combo = method_combo
         self.view_combo = view_combo
+        self.collapse_check = collapse_check
         parent.pltlayout[currplt].insertWidget(0, bar)
 
     def _on_method_changed(self, method):
@@ -1033,6 +1061,10 @@ class plot_ordination(ui_plot):
 
     def _on_view_changed(self, view):
         self.view = view
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_collapse_replicates_toggled(self, checked):
+        self.collapse_replicates = checked
         self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
 
     def plot(self, parent, file, filtereddfs, groupsets):
@@ -1050,7 +1082,7 @@ class plot_ordination(ui_plot):
         self._last_filtereddfs = filtereddfs
         self._last_groupsets = groupsets
 
-        collapse_replicates = parent.dialog.ui.checkBox_collapsereps.isChecked()
+        collapse_replicates = self.collapse_replicates
         raw_header = cached_read_csv(
             parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'),
             sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()

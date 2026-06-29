@@ -83,7 +83,14 @@ class UIFunctions(MainWindow):
         self.ui.frame_plts.hide()
         self.ui.checkBox_fc.hide()
         self.ui.checkBox_ttest.hide()
-        self.dialog.ui.checkBox_bootstrap.setChecked(True)
+        # "Bootstrap Analysis" and "Collapse Technical Replicates" moved
+        # from this global plot-config dialog onto their one relevant
+        # plot's own switcher bar (plot_dendrogram's "Bootstrap" checkbox,
+        # plot_ordination's "Collapse Replicates" checkbox) -- hide the
+        # now-orphaned dialog widgets rather than editing the generated
+        # ui_plotparam.py.
+        self.dialog.ui.frame_bootstrap.hide()
+        self.dialog.ui.frame_2.hide()
 
         # Top bar functions
         self.ui.btn_maximize.clicked.connect(lambda: UIFunctions.maximize_restore(self))

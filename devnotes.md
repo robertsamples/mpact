@@ -221,6 +221,14 @@ only handles the combo boxes, axes, and pick events.
   instead (`test_ordination.py`'s synthetic-replicate-structure test, cross-
   checked against real example data with a scratch script during
   development).
+- **The checkbox itself later moved off the global plot-config dialog**:
+  `checkBox_collapsereps` only ever affected this one plot, so it's now
+  `plot_ordination`'s own "Collapse Replicates" checkbox (`self.collapse_replicates`,
+  default `True`) in its switcher bar, same move as `plot_dendrogram`'s
+  "Bootstrap" checkbox (see the dendrogram section). The dialog checkbox's
+  containing frame (`frame_2`) is hidden at runtime rather than edited out
+  of generated code. This field was never in `paramfields.CHECKBOX_FIELDS`
+  (wasn't pickled before either), so no save/load behavior changed.
 - **Loadings view and high-dimensional data**: thousands of features can't
   all be drawn legibly, so only the top-25 by loading-vector magnitude are
   shown by default (`ordination.top_loadings()`). Whichever feature is
@@ -315,6 +323,34 @@ substitution pattern as `plot_ordination`'s method/view bar):
 
 Both views' purity math is the same Qt-free linkage-traversal logic in
 `clusterpurity.py`, unit-tested in `tests/test_clusterpurity.py`.
+
+- **Red is "bridge" coloring, not "any impure ancestor"**: an earlier
+  version colored every impure merge red, including every ancestor above a
+  single mixing event all the way to the root -- since almost any real
+  dataset has *some* mixing somewhere, this painted most of the tree's
+  upper structure red regardless of how localized the actual problem was.
+  `purity_link_color_func()` now distinguishes three states per merge: pure
+  (`true_color`/green), a *bridge* -- impure, but at least one child was
+  itself pure, i.e. this is the specific merge where a different group
+  first gets bridged in (`false_color`/red), or *neutral* -- impure with
+  both children already impure, i.e. just continuing an already-known mix
+  further up the tree with no new information (`neutral_color`/black, the
+  same color as "no coloring" so it visually recedes). Verified with a
+  hand-built 4-group linkage matrix (deterministic merge order, no
+  clustering ambiguity) asserting the root of two already-mixed clades is
+  black, not red, while the two actual group-meeting points are red.
+- **Bootstrap is now a per-tab checkbox, not a global one**: the
+  plot-config dialog's "Bootstrap Analysis" checkbox (`checkBox_bootstrap`)
+  only ever affected this one plot, so it moved into `plot_dendrogram`'s own
+  switcher bar (`self.bootstrap`, default `True` -- matching the effective
+  startup default the old checkbox was forced to in `UIFunctions`, which
+  differed from its own Designer-set default of `False`). The dialog
+  checkbox's containing frame (`frame_bootstrap`) is hidden at runtime in
+  `UIFunctions` rather than edited out of the generated `ui_plotparam.py`.
+  `('bootstrap', ...)` was also dropped from `paramfields.CHECKBOX_FIELDS`,
+  so it's no longer saved into `.mpct` files -- consistent with the
+  dendrogram's other per-tab state (View, Color), none of which persist
+  across save/load either.
 
 - **Purity is a strict, whole-group check, not "any uniform subset"**: a
   label only counts as pure if *every* leaf carrying it ends up in one clade
