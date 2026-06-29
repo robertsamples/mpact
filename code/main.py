@@ -73,24 +73,22 @@ Check if low_memory=False increases ram usage for average grps?
 - add pca option and allow visualization of key features on multivar plt?
 
 #TODO#
-- in source spectra viewer in tab plot
-- do overall data quality score, AUC
+- in source spectra viewer in spectrum details tab plot with preexisting in source fragment deconvolution algoirthm
+- clean up import sections and general code for better maintability and good syntax/standards
+- do overall data quality score, AUC on CV plot or something, may be present in a different form already
 - standardize method and class names
-- database management, options
-- fix up analysisinfo file output
-
-- mzmine msp file import
-- add other ordination options
+- add terminal output with current line to status bar instead of just static status messages, perhaps with expand button to show full terminal output
+- potentially consider other database options like HMDB etc
+- fix up analysisinfo file output with better and more useful log ingo
+- add other ordination options like pca, pls-da, etc etc
 - add custom keyword arguments for each plot to make calling them easier
-- add runcheck before searching when switching to search tab
-- Figure out way to have only active plot be updated and then to update others
-    when plot is switched
-- make it so groups can be reordered
+- add runcheck before searching when switching to search tab if not present
+- make it so groups can be reordered in the groupsets widgets?
 - consider if indexing and feature highly functions in plot options have any easy wins for optimization or disk use. (prob not)
 - make goto buttons just one class and lambda an index for the stacked widgets
     when connecting!
 
-
+likely items that need more thought and planning
 - maybe have a comparison mode for many different strains with and without elicitor
 - specificity/sensitivity plot
 - other statistical models
