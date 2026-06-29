@@ -1,8 +1,7 @@
-# CLAUDE.md — MPACT
+# devnotes.md — MPACT
 
-Guidance for Claude Code (and humans) working in this repo. MPACT is a PyQt5
-desktop tool for mass-spectrometry / natural-products data analysis. Code lives
-in `code/`.
+MPACT is a PyQt5 desktop tool for mass-spectrometry / natural-products data analysis. 
+Code runs in ./code.
 
 ## Running the app
 
@@ -19,7 +18,59 @@ in `code/`.
   only resolves when run as a script. So the GUI stack cannot be imported
   headlessly.
 
-## ⚠️ NumPy 2.x / Anaconda dependency hazard (read before touching deps)
+## Portable build (no Anaconda required)
+
+`build/mpact.spec` + `build/build_windows.bat` produce a standalone Windows
+folder build via PyInstaller that end users can unzip and run without
+installing Anaconda, Python, or any packages. See `build/README.md` for the
+build steps and the reasoning behind the two non-obvious spec choices
+(`--onedir` not `--onefile`; `contents_directory='.'`) and the dependency
+gotchas (`epam.indigo`'s native DLL needs `collect_all`, not just
+`hiddenimports`; `requirements.txt` intentionally allows NumPy 2.x, unlike the
+Anaconda-env cap below). Built and smoke-tested 2026-06-29 (offscreen launch,
+all imports including indigo's native lib resolved cleanly); not yet run
+against real data end-to-end by a human.
+
+### Portable builds for Linux / Mac (not yet implemented)
+
+Not attempted yet — logged here for whoever picks this up next, since the
+Windows build surfaced platform-specific issues that will very likely recur:
+
+- **PyInstaller itself is cross-platform but builds aren't** — you cannot
+  cross-compile a Linux or Mac build from this Windows dev machine; each
+  needs to be built (and ideally smoke-tested per `build/README.md`) on that
+  OS. The existing `build/mpact.spec` should mostly carry over unchanged
+  (`pathex`, `datas`, `hiddenimports` are all OS-agnostic Python), but the
+  `epam.indigo` fix is the one item proven to be OS-specific: its DLL lookup
+  path is `indigo/lib/<platform>/...` (`windows-x86_64` here) — confirm
+  `epam.indigo` actually ships Linux (`linux-x86_64`) and Mac
+  (`mac-x86_64`/`mac-arm64`) native libraries in its PyPI wheel for the
+  target platform/architecture before assuming `collect_all('indigo')` just
+  works there too; if not, that dependency may need a different
+  installation path (e.g. a system package) on that OS.
+- **macOS app bundling**: a plain PyInstaller onedir folder runs on Mac, but
+  for something distributable as a normal double-clickable app, the spec
+  would need a `BUNDLE(...)` step (PyInstaller supports this directly in the
+  same spec file) to produce a `MPACT.app`. Unsigned/unnotarized `.app`
+  bundles get Gatekeeper warnings on other people's Macs — fine for the
+  team's own use, a blocker for wider distribution without an Apple
+  Developer signing certificate.
+- **Linux**: PyInstaller onedir output runs fine as a plain executable +
+  folder (no installer step strictly required), but Qt's platform plugin
+  selection is more failure-prone than on Windows/Mac — expect to need
+  `QT_QPA_PLATFORM`/`xcb` library checks on whatever distro it's tested on
+  first, the same class of issue the offscreen-platform smoke test exists to
+  catch early (`build/README.md`).
+- **`run.bat`'s cwd-relative-path assumption** (`code/main.py` reading
+  `npatlas.tsv`/`compoundimages/` relative to cwd, not `__file__`) is
+  platform-agnostic in principle — a Linux/Mac launcher script just needs
+  the equivalent `cd` into the build's own folder before exec'ing the binary,
+  same as `--contents-directory .` solves it for the Windows PyInstaller
+  build.
+- Given all of the above is unverified, treat any of it as a starting
+  hypothesis to confirm on real Linux/Mac hardware, not a finished plan.
+
+##  NumPy 2.x / Anaconda dependency hazard (read before touching deps)
 
 This runs in a conda env whose pandas/matplotlib/scipy are compiled against
 **NumPy 1.x**. A bare `pip install <pkg>` can upgrade NumPy to 2.x, which breaks
