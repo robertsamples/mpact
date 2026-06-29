@@ -10,6 +10,7 @@ internally (no self.ui.* calls) -- this only changes its signature from
 run_MSFaST(self) -> run_MSFaST(params) change.
 """
 
+import numpy as np
 import pandas as pd
 
 from csvcache import cached_read_csv, invalidate
@@ -26,7 +27,15 @@ def search_npatlas(outputdir, filename_stem, atlas, ppm_threshold):
     """
     hitdb = {}
     iondict = cached_read_csv(outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-    iondict['hits'] = ''
+    # NaN, not '' -- an empty-string default makes pandas infer a strict
+    # string dtype for this column on newer pandas, which then rejects the
+    # int assignment below (hits.shape[0]) outright. NaN keeps the column
+    # numeric from the start (compatible with int assignment) and, for any
+    # iondict row never touched by the loop below (a feature outside the
+    # filtered/searched set), the comparison fillfttree() does later
+    # (iondict['hits'] >= 0) correctly evaluates to False rather than
+    # erroring on a string/int comparison.
+    iondict['hits'] = np.nan
     msdata = cached_read_csv(outputdir / (filename_stem + '_filtered.csv'),
                               sep=',', header=[2], index_col=None).iloc[:, :3]
 
