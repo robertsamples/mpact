@@ -1,0 +1,31 @@
+# Runtime dependencies for MPACT, pinned to versions verified against the
+# current code/ tree. Used by the PyInstaller portable build
+# (build/build_windows.bat), which installs these into a throwaway venv.
+#
+# NOTE this is NOT the same numpy constraint as importdependencies.py / the
+# Anaconda dev env hazard documented in CLAUDE.md. That cap (numpy<2) exists
+# only to protect conda-compiled pandas/matplotlib/scipy binaries built
+# against the NumPy 1.x ABI -- it does not apply here, because this file
+# provisions a clean pip-only venv where pandas/scipy/etc. are pip wheels
+# built against NumPy 2.x's ABI from the start. Capping numpy<2 here instead
+# makes the resolve impossible (fastcluster's PyPI wheel for Python 3.12
+# requires numpy>=2), and the codebase has no numpy 1.x-only API usage
+# (`np.float`/`np.int`/etc. were checked and are not used), so numpy 2.x is
+# safe for this build.
+pandas==2.2.2
+scipy==1.13.1
+matplotlib==3.8.4
+seaborn==0.13.2
+PyQt5==5.15.10
+scikit-learn==1.4.2
+tqdm==4.66.4
+epam.indigo==1.23.0
+UpSetPlot==0.9.0
+squarify==0.4.4
+
+# Optional: faster hierarchical clustering for the heatmap/bootstrap dendrogram.
+# importdependencies.py installs this automatically at runtime if missing and
+# never fails startup if it can't be installed -- listed here only so the
+# portable build ships with it preinstalled instead of trying to pip install
+# at first launch (which the frozen exe's end users won't be able to do).
+fastcluster==1.3.0
