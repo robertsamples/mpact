@@ -1,5 +1,6 @@
 import pandas as pd
 
+from csvcache import cached_read_csv
 from dbsearch import search_npatlas
 
 
@@ -63,3 +64,27 @@ def test_no_match_outside_ppm_window(tmp_path):
 
     assert hitdb['c1'].empty
     assert hitdb['c2'].empty
+
+
+def test_invalidates_stale_cached_reads_under_other_shapes(tmp_path):
+    """Regression guard: fillfttree() (main.py) reads iondict.csv with
+    header=[0], index_col=None -- a different cache key than
+    search_npatlas's own internal read (index_col=[0]). Before
+    search_npatlas() ran, something else (e.g. _finish_analysis) may have
+    already cached that other shape *without* the 'hits' column. If
+    search_npatlas doesn't invalidate the whole cache after writing, that
+    other shape keeps serving the pre-search copy forever -- exactly the
+    KeyError: 'hits' crash this guards against.
+    """
+    outputdir, stem = setup_files(tmp_path)
+    atlas = make_atlas()
+
+    # Simulate _finish_analysis's earlier read, before any hits exist,
+    # under the *other* shape fillfttree() will later use.
+    stale = cached_read_csv(outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+    assert 'hits' not in stale.columns
+
+    search_npatlas(outputdir, stem, atlas, ppm_threshold=50)
+
+    fresh = cached_read_csv(outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+    assert 'hits' in fresh.columns

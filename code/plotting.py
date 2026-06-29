@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pickle
 
-from csvcache import cached_read_csv
+from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 
 import matplotlib
 #matplotlib.style.use('ggplot')
@@ -711,6 +711,10 @@ class plot_volcano(ui_plot):
             filtereddfs[elem]['logfc'] = np.log2(filtereddfs[elem]['fc']) #not sure if best to move this bit to stats?
         iondict['logfc'] = np.log2(iondict['fc'])
         iondict.to_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', header = True, index = False)
+        # iondict.csv just changed on disk -- drop every cached read of it so
+        # other code (e.g. fillfttree(), _refresh_highlight()) doesn't keep
+        # serving a stale pre-volcano-plot copy under some other cache key.
+        invalidate_csv_cache()
 
         maxpval = 0
         for elem in filtereddfs:
