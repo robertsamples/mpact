@@ -2,7 +2,7 @@
 #
 # PyInstaller spec for a portable MPACT build (no Anaconda / conda env needed
 # on the end user's machine). See build/README.md for how to run this and
-# CLAUDE.md for the background on why --onedir (not --onefile) was chosen.
+# devnotes.md for the background on why --onedir (not --onefile) was chosen.
 #
 # Build from the repo root with:
 #   pyinstaller build/mpact.spec --noconfirm
@@ -19,17 +19,25 @@ block_cipher = None
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(SPEC), os.pardir))
 CODE_DIR = os.path.join(REPO_ROOT, "code")
 
-# Data files main.py reads/writes via cwd-relative paths (run.bat / this spec
-# both assume the process cwd is the folder main.py itself lives in -- here,
-# the dist/MPACT/ folder next to the exe). npatlas.tsv is read-only reference
-# data; compoundimages/ is a read+write cache of rendered structure PNGs that
-# main.py creates new entries in at runtime (code/main.py ~line 664), so it
-# must land in a writable location next to the exe, not inside the PyInstaller
-# onefile temp-extraction dir -- this is the main reason this build uses
-# --onedir instead of --onefile.
+# Data files main.py/plotting.py read via cwd-relative paths (run.bat / this
+# spec both assume the process cwd is the folder main.py itself lives in --
+# here, the dist/MPACT/ folder next to the exe). npatlas.tsv is read-only
+# reference data; compoundimages/ is a read+write cache of rendered structure
+# PNGs that main.py creates new entries in at runtime (code/main.py ~line
+# 664), so it must land in a writable location next to the exe, not inside
+# the PyInstaller onefile temp-extraction dir -- this is the main reason this
+# build uses --onedir instead of --onefile. cog.ico is the plot-toolbar
+# "Configure" button's icon (plotting.py's NavigationToolbar -- opens the
+# bootstrap/collapse-technical-replicates dialog); it's a bare cwd-relative
+# QIcon("cog.ico") load there too, same as the other two, and was missed in
+# the original spec -- PyInstaller's static analysis can't see a file path
+# inside a string literal, so anything loaded that way must be added here
+# explicitly or it silently fails to load (a QToolButton with no icon and no
+# text collapses to looking like it's missing entirely, rather than erroring).
 datas = [
     (os.path.join(CODE_DIR, "npatlas.tsv"), "."),
     (os.path.join(CODE_DIR, "compoundimages"), "compoundimages"),
+    (os.path.join(CODE_DIR, "cog.ico"), "."),
 ]
 binaries = []
 
@@ -84,7 +92,7 @@ exe = EXE(
     # console=False would silently swallow diagnostics a user might need to
     # report a bug.
     console=True,
-    icon=os.path.join(REPO_ROOT, "cog.ico") if os.path.isfile(os.path.join(REPO_ROOT, "cog.ico")) else None,
+    icon=os.path.join(CODE_DIR, "cog.ico") if os.path.isfile(os.path.join(CODE_DIR, "cog.ico")) else None,
     # PyInstaller >=6.0 defaults onedir builds to nesting everything except
     # the exe under an _internal/ subfolder. main.py's data paths
     # ('npatlas.tsv', 'compoundimages/...') are bare and resolved against the
