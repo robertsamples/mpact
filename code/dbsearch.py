@@ -12,7 +12,7 @@ run_MSFaST(self) -> run_MSFaST(params) change.
 
 import pandas as pd
 
-from csvcache import cached_read_csv
+from csvcache import cached_read_csv, invalidate
 
 
 def search_npatlas(outputdir, filename_stem, atlas, ppm_threshold):
@@ -44,4 +44,9 @@ def search_npatlas(outputdir, filename_stem, atlas, ppm_threshold):
         iondict.loc[mrow['Compound'], 'hits'] = hits.shape[0]
 
     iondict.to_csv(outputdir / 'iondict.csv', header=True, index=True)
+    # iondict.csv just changed on disk (gained/updated the 'hits' column) --
+    # drop every cached read of it, regardless of which header/index_col
+    # shape it was cached under, so the next read (by anyone, any shape)
+    # sees this update instead of a stale pre-search copy.
+    invalidate()
     return hitdb, iondict
