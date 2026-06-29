@@ -10,6 +10,7 @@ import pickle
 
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 import ordination
+import clusterpurity
 
 import matplotlib
 #matplotlib.style.use('ggplot')
@@ -798,45 +799,126 @@ class plot_fc3d(ui_plot):
 
 class plot_dendrogram(ui_plot):
     """
-    Dendrogram generation.
-    
-    A CSV file of data for clustering is read and code performs hierarchical clustering using the ward method
-    and the euclidean distance metric. The resulting dendrogram is plotted on the given frame using the parent object's
-    figure and canvas. The dendrogram can be either regular or bootstrapped depending on the value of the
-    parent.analysis_paramsgui.bootstrap parameter. The resulting plot is saved to the parent object's figure and
-    displayed on the canvas.
+    Dendrogram generation, with a combo-box switcher (same pattern as
+    plot_ordination's method/view bar) between two purity-colored views:
+
+    - "Technical Replicates": every injection is its own leaf, colored
+      green wherever an entire Sample's injections cluster together before
+      merging with anything else -- a quick visual QC for whether technical
+      replicates are tight.
+    - "Biological Replicates": injections are first averaged per Sample
+      (same collapsing logic as the ordination tab's "Collapse Technical
+      Replicates" checkbox, via ordination.load_ordination_matrix), then
+      leaves are colored green wherever an entire Biolgroup's samples
+      cluster together -- a quick visual QC for whether biological groups
+      are separable at all, independent of technical noise.
+
+    Either view can be regular or bootstrapped (PvClust), depending on
+    parent.analysis_paramsgui.bootstrap, same as before this rework. The
+    purity-coloring math lives in the Qt-free clusterpurity.py.
     """
+
+    VIEWS = ('Technical Replicates', 'Biological Replicates')
 
     def __init__(self, parent, currplt, frame, file, filtereddfs, groupsets):
         ui_plot.__init__(self, parent, currplt, frame)
         self.parent = parent
         self.currplt = currplt
+        # Default matches the plot's previous (injection-level) behaviour
+        # exactly, so existing sessions see no change until they explicitly
+        # switch to the biological-replicate view.
+        self.view = 'Technical Replicates'
+        self._build_switcher_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
 
+    def _build_switcher_bar(self, parent, currplt):
+        bar = QtWidgets.QWidget()
+        bar.setStyleSheet(_SWITCHER_BAR_STYLE)
+        bar.setMaximumHeight(_SWITCHER_BAR_HEIGHT)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+
+        layout.addWidget(QtWidgets.QLabel('View:'))
+        view_combo = QtWidgets.QComboBox()
+        view_combo.addItems(self.VIEWS)
+        view_combo.setCurrentText(self.view)
+        view_combo.currentTextChanged.connect(self._on_view_changed)
+        layout.addWidget(view_combo)
+        layout.addStretch()
+
+        self.view_combo = view_combo
+        parent.pltlayout[currplt].insertWidget(0, bar)
+
+    def _on_view_changed(self, view):
+        self.view = view
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
     def plot(self, parent, file, filtereddfs, groupsets):
-        heirarch = pd.read_csv(file, sep=',', header=[2], index_col=[0]).drop(['m/z', 'Retention time (min)'], axis=1)
-        data_scaled = normalize(heirarch, axis=0)  # normalize features
-        data_scaled = pd.DataFrame(data_scaled, columns=heirarch.columns, index=heirarch.index)
-        textlabels = [elem for elem in data_scaled.columns.tolist()]
-            
+        self._last_file = file
+        self._last_filtereddfs = filtereddfs
+        self._last_groupsets = groupsets
+
+        # PvClust (bootstrap path) expects "variables x objects" -- it
+        # bootstraps over the rows (features) and transposes internally
+        # before clustering the columns (the objects/leaves). shc.linkage
+        # (regular path) expects the opposite, "objects x variables" --
+        # build both orientations from the same scaled data below.
+        if self.view == 'Biological Replicates':
+            # Collapse technical replicates first -- leaves are Samples,
+            # purity is judged against Biolgroup.
+            raw_header = cached_read_csv(
+                parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'),
+                sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
+            x, biolgroup = ordination.load_ordination_matrix(file, raw_header.copy(), collapse_replicates=True)
+            data_scaled = normalize(x.values, axis=1)  # normalize each sample's profile
+            data_scaled = pd.DataFrame(data_scaled, columns=x.columns, index=x.index)  # samples x features
+            textlabels = data_scaled.index.tolist()
+            leaf_labels = [biolgroup[sample] for sample in textlabels]
+            data_for_linkage = data_scaled
+            data_for_pvclust = data_scaled.transpose()
+            purity_noun = 'biological groups separable'
+        else:
+            heirarch = pd.read_csv(file, sep=',', header=[2], index_col=[0]).drop(['m/z', 'Retention time (min)'], axis=1)
+            data_scaled = normalize(heirarch, axis=0)  # normalize features
+            data_scaled = pd.DataFrame(data_scaled, columns=heirarch.columns, index=heirarch.index)  # features x injections
+            textlabels = data_scaled.columns.tolist()
+            raw_header = cached_read_csv(
+                parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'),
+                sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
+            raw_header.columns = ['Biolgroup', 'Sample', 'Injection']
+            sample_of_injection = raw_header.set_index('Injection')['Sample'].to_dict()
+            leaf_labels = [sample_of_injection[name] for name in textlabels]
+            data_for_linkage = data_scaled.transpose()
+            data_for_pvclust = data_scaled
+            purity_noun = "samples' replicates clustered together"
+
         if parent.analysis_paramsgui.bootstrap:
             # bootstrap dendrogram
-            pv = PvClust(data_scaled, method="ward", metric="euclidean", nboot=1000, parallel=True)
-            dend = pv.plot(parent.ax[self.currplt], labels=textlabels)
+            pv = PvClust(data_for_pvclust, method="ward", metric="euclidean", nboot=1000, parallel=True)
+            link_color_func = clusterpurity.purity_link_color_func(pv.linkage_matrix, leaf_labels)
+            dend = pv.plot(parent.ax[self.currplt], labels=textlabels, link_color_func=link_color_func)
+            Z = pv.linkage_matrix
         else:
             # regular dendrogram
-            dend = shc.dendrogram(shc.linkage(data_scaled.transpose(), method='ward'), ax=parent.ax[self.currplt], leaf_rotation=90, color_threshold=0, above_threshold_color='black', labels=textlabels)  # default leaf label size 16
+            Z = shc.linkage(data_for_linkage, method='ward')
+            link_color_func = clusterpurity.purity_link_color_func(Z, leaf_labels)
+            dend = shc.dendrogram(Z, ax=parent.ax[self.currplt], leaf_rotation=90, above_threshold_color='black', link_color_func=link_color_func, labels=textlabels)  # default leaf label size 16
+
+        n_pure, n_total = clusterpurity.purity_summary(Z, leaf_labels)
+        parent.ax[self.currplt].set_title(f'{n_pure}/{n_total} {purity_noun}', fontsize=10)
 
         parent.fig[self.currplt].subplots_adjust(
             left=0.1, right=0.95, bottom=0.35, top=0.9, hspace=0.2, wspace=0.2)
         parent.canvas[self.currplt].draw()
 
-_ORDINATION_SWITCHER_BAR_HEIGHT = 32
+# Shared by plot_dendrogram's and plot_ordination's combo-box switcher bars
+# -- page_dend and page_pca both have the same light background
+# (rgba(225,225,225,255), see ui_main.py), unlike searchtree.py's filter bar
+# (a dark-themed tab) -- dark text on a light/white combo box, not
+# searchtree's light-on-dark scheme.
+_SWITCHER_BAR_HEIGHT = 32
 
-# Unlike searchtree.py's filter bar (a dark-themed tab), page_pca's
-# background is light (rgba(225,225,225,255), see ui_main.py) -- dark text
-# on a light/white combo box, not searchtree's light-on-dark scheme.
-_ORDINATION_SWITCHER_STYLE = """
+_SWITCHER_BAR_STYLE = """
 QWidget {
     background: transparent;
 }
@@ -887,8 +969,8 @@ class plot_ordination(ui_plot):
 
     def _build_switcher_bar(self, parent, currplt):
         bar = QtWidgets.QWidget()
-        bar.setStyleSheet(_ORDINATION_SWITCHER_STYLE)
-        bar.setMaximumHeight(_ORDINATION_SWITCHER_BAR_HEIGHT)
+        bar.setStyleSheet(_SWITCHER_BAR_STYLE)
+        bar.setMaximumHeight(_SWITCHER_BAR_HEIGHT)
         layout = QtWidgets.QHBoxLayout(bar)
         layout.setContentsMargins(4, 2, 4, 2)
 

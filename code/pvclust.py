@@ -187,10 +187,11 @@ class PvClust:
             columns=['AU', 'BP', 'SE.AU', 'SE.BP', 'pchi', 'v', 'c'])
         return result
 
-    def plot(self, ax, labels=None): #added axis input
+    def plot(self, ax, labels=None, link_color_func=None): #added axis input
         """Plot dendrogram with AU BP values for each node"""
         plot_dendrogram(self.linkage_matrix,
-                        np.array(self.result[['AU', 'BP']]), ax, labels)
+                        np.array(self.result[['AU', 'BP']]), ax, labels,
+                        link_color_func)
 
     def seplot(self, pvalue='AU', annotate=False):
         """p-values vs Standard error plot"""
@@ -271,7 +272,7 @@ class HierarchicalClusteringClusters:
         return clusters
 
 
-def plot_dendrogram(linkage_matrix, pvalues, axis, labels=None): #added axis input
+def plot_dendrogram(linkage_matrix, pvalues, axis, labels=None, link_color_func=None): #added axis input
     """ Plot dendrogram with AU BP values for each node"""
     d = dendrogram(linkage_matrix, no_plot=True)
     xcoord = d["icoord"]
@@ -280,13 +281,18 @@ def plot_dendrogram(linkage_matrix, pvalues, axis, labels=None): #added axis inp
     x = {i: (j[1]+j[2])/2 for i, j in enumerate(xcoord)}
     y = {i: j[1] for i, j in enumerate(ycoord)}
     pos = node_positions(y, x)
-    
+
 
     plt.figure(figsize=(12, 8))
     plt.tight_layout()
     set_link_color_palette(['c', 'g'])
+    # link_color_func, when given, takes priority over color_threshold/
+    # above_threshold_color (scipy's own precedence rule) -- that's how the
+    # dendrogram tab's purity coloring (clusterpurity.py) reaches the
+    # bootstrap dendrogram too.
     d = dendrogram(linkage_matrix, labels=labels, above_threshold_color='black',
-                   color_threshold=0, leaf_rotation=90, ax = axis)
+                   color_threshold=0, leaf_rotation=90, ax=axis,
+                   link_color_func=link_color_func)
     maxval = max(y.values())
     ax = axis
     for node, (x, y) in pos.items(): #modifications added to scale y axis label shifts

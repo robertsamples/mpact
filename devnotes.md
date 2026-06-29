@@ -108,7 +108,8 @@ that way. Required deps (gate startup): `epam.indigo`→`indigo`, `UpSetPlot`→
   fields), `biogroups.py` (`getgroups()`'s metadata-join/group-derivation
   core), `dbsearch.py` (`fulldbsearch()`'s NPAtlas ppm-window matching
   core), `ordination.py` (PCA/NMDS/PLS-DA + technical-replicate collapsing
-  + top-N loadings selection for the multivariate plot tab). Each
+  + top-N loadings selection for the multivariate plot tab), `clusterpurity.py`
+  (dendrogram branch-purity coloring for the dendrogram tab). Each
   corresponding `MainWindow` method is now a thin wrapper: call the module
   function, then apply the result to widgets/`self`.
 - **Runtime widget substitution into a Designer placeholder** is an
@@ -161,7 +162,8 @@ python -m pytest code/tests -q
 ```
 
 Covers `filter`, `stats`, `importdependencies`, `translators`, `groupsets`,
-`searchtree`, `ordination`. Add tests here for any new Qt-free logic.
+`searchtree`, `ordination`, `clusterpurity`. Add tests here for any new
+Qt-free logic.
 
 `conftest.py` sets `QT_QPA_PLATFORM=offscreen` and provides a session-scoped
 `qapp` fixture: PyQt5 widgets/models/signals *can* be exercised headlessly via
@@ -278,6 +280,67 @@ only handles the combo boxes, axes, and pick events.
   shipping PCA/NMDS/PLS-DA without a reference dataset to validate against.
   Logged here as the next ordination method to add if ever revisited, not
   started.
+
+## Dendrogram purity coloring (`plotting.plot_dendrogram`, `clusterpurity.py`)
+
+The dendrogram tab has a combo-box switcher (same runtime-widget-substitution
+pattern as `plot_ordination`'s method/view bar) between two views, both
+purity-colored to make a QC judgment visible at a glance rather than read off
+leaf labels one at a time:
+
+- **Technical Replicates** (default — matches the tab's previous, only,
+  behaviour): every Injection is its own leaf. A branch is colored green
+  wherever *all* of one Sample's injections merge together before merging
+  with anything else (i.e. that Sample is a monophyletic clade) — a
+  tight green clump means that sample's replicates agree; black means they
+  don't.
+- **Biological Replicates**: technical replicates are averaged first (same
+  `ordination.load_ordination_matrix(..., collapse_replicates=True)` used by
+  the multivariate tab's checkbox), so leaves are Samples, and purity is
+  judged against Biolgroup instead — green means a whole biological group's
+  samples cluster together before meeting another group, i.e. the groups are
+  separable; black means they're not.
+
+The plot title reports `n_pure/n_total` (e.g. "7/9 samples' replicates
+clustered together", "3/3 biological groups separable") using
+`clusterpurity.purity_summary()` — the same Qt-free linkage-traversal logic
+that drives the coloring, unit-tested in `tests/test_clusterpurity.py`.
+
+- **Purity is a strict, whole-group check, not "any uniform subset"**: a
+  label only counts as pure if *every* leaf carrying it ends up in one clade
+  before that clade touches a different label — 2 of a Sample's 3 replicates
+  merging together does NOT make that Sample pure if the third replicate
+  clusters elsewhere. An earlier version of `purity_summary()` got this
+  wrong (counted a label pure as soon as ANY uniform-label merge occurred,
+  which is right for `purity_link_color_func`'s per-branch coloring but wrong
+  for the whole-group summary count) — caught by a test built from a
+  deliberately "rogue" planted point, not by inspection.
+- **PvClust orientation gotcha**: `pvclust.PvClust` expects "variables x
+  objects" (rows = the things bootstrapped over, i.e. features; it
+  transposes internally before clustering the columns) — the *opposite*
+  orientation from `scipy.cluster.hierarchy.linkage`, which expects "objects
+  x variables". `plot_dendrogram.plot()` builds both orientations
+  (`data_for_linkage`, `data_for_pvclust`) from the same scaled data rather
+  than reusing one array, since which one is "transposed" flips between the
+  Technical (features x injections is the natural read) and Biological
+  (samples x features, from `load_ordination_matrix`) views.
+- **`link_color_func` threaded through the bootstrap path too**:
+  `PvClust.plot()` and the free function `pvclust.plot_dendrogram()` both
+  gained a `link_color_func=None` passthrough parameter into their inner
+  `scipy.cluster.hierarchy.dendrogram()` call, so the AU/BP bootstrap
+  dendrogram gets the same purity coloring as the regular one (`scipy`'s own
+  precedence rule: `link_color_func`, when given, overrides
+  `color_threshold`/`above_threshold_color`).
+- **Multiprocessing safety note (re-learned, not new)**: validating the
+  bootstrap path's wiring during development used `parallel=False` and a
+  tiny `nboot`, never `PvClust(..., parallel=True)` in an ad hoc script —
+  `multiprocessing.Pool()` re-executes a script's top-level code in each
+  spawned child on Windows unless the call site is guarded by
+  `if __name__ == '__main__':` (the same class of hazard as the frozen-exe
+  fork-bomb bug elsewhere in this file, just without needing
+  `freeze_support()` specifically). The real app is fine — `main.py` already
+  guards its entry point — but throwaway test scripts need the same
+  discipline.
 
 ## Conventions
 
