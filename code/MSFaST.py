@@ -10,7 +10,6 @@ import stats
 from groupsets import normalize_graphfilters
 from datetime import datetime
 import time
-from pathlib import Path
 
 #---Classes---
 
@@ -187,6 +186,11 @@ def run_MSFaST(params):
     # Filtering and error propagation
     print('Filtering data')
     ionfilters = {}
+    # Initialise here (not only inside `if analysis_params.grpave:`) so the
+    # unconditional groupionlists[...] writes further down (and the blank
+    # filter, which reads it) can't raise NameError if grpave is ever off.
+    # The GUI currently forces grpave=True, but loaded sessions/tests need not.
+    groupionlists = {}
     if analysis_params.relfil:
         ionfilters = filter.relationalfilter(analysis_params, ionfilters)
         if analysis_params.merge:
@@ -254,7 +258,7 @@ def run_MSFaST(params):
     msdata_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'), sep = ',', header = [0, 1, 2], index_col = [0, 1, 2])
     analysisrec = open(analysis_params.outputdir / 'analysisinfo.txt',"w")
     analysisrec.writelines(['Analysis Date: ' + str(datetime.now()) + '\n',
-                            'Runetime: ' + str(round(runtime, 2)) + ' seconds\n',
+                            'Runtime: ' + str(round(runtime, 2)) + ' seconds\n',
                             'Input file: ' + str(analysis_params.filename) + '\n',
                             'Sample list: ' + str(analysis_params.samplelistfilename) + '\n',
                             'Extract metadata file: ' + str(analysis_params.extractmetadatafilename) + '\n',
@@ -280,10 +284,10 @@ def run_MSFaST(params):
     text = ''
     if analysis_params.relfil:
         text += 'Features failing peak correction filtering: ' + str(len(ionfilters['relfil'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['relfil'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
-    if analysis_params.blnkfltr: #FIX THIS REF TO "BLANKS"
+    if analysis_params.blnkfltr:
         text += 'Features failing blank filtering: ' + str(len(groupionlists[analysis_params.blnkgrp])) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(groupionlists[analysis_params.blnkgrp]) / len(msdata_unformatted.index), 2)) + '%\n'
     if analysis_params.decon:
-        text += 'Features failing blank filtering: ' + str(len(ionfilters['insource'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['insource'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
+        text += 'Features failing in-source/deconvolution filtering: ' + str(len(ionfilters['insource'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['insource'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
     if analysis_params.CVfil:
         text += 'Features failing CV filtering: ' + str(len(ionfilters['cv'].ions)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * len(ionfilters['cv'].ions) / len(msdata_unformatted.index), 2)) + '%\n'
     text += 'Features failing any filters: ' + str(len(msdata_unformatted.index) - len(msdata_filtered.index)) + '/' + str(len(msdata_unformatted.index)) + ' ' + str(round(100 * (len(msdata_unformatted.index) - len(msdata_filtered.index)) / len(msdata_unformatted.index), 2)) + '%\n'
@@ -310,7 +314,7 @@ def run_MSFaST(params):
                             'RT/mz/FC: ' + str(analysis_params.FC3Dplt) + ' ' + str(analysis_params.statstgrps) + '\n',
                             'KMD/mz ' + str(analysis_params.KMD) + '\n',
                             #'KMD/mz/RT ' + str(analysis_params.___) + '\n',
-                            'PCA unfitlered: ' + str(analysis_params.PCA) + '\n',
+                            'PCA unfiltered: ' + str(analysis_params.PCA) + '\n',
                             'PCA filtered: ' + str(analysis_params.PCA) + '\n',
                             'Dendrogram (ward) unfiltered: ' + str(analysis_params.Dendrogram) + '\n',
                             'Dendrogram (ward) Filtered: ' + str(analysis_params.Dendrogram) + '\n',

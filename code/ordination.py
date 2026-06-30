@@ -15,6 +15,8 @@ validate against. Logged as future work, not started.
 This module is Qt-free and unit-tested (see ``tests/test_ordination.py``).
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from sklearn.cross_decomposition import PLSRegression
@@ -75,11 +77,19 @@ def load_ordination_matrix(file, raw_msdata_header, collapse_replicates):
         for elem in collapsed_columns:
             header.append((elem[1], '', elem[0]))
         msdata.columns = pd.MultiIndex.from_tuples(header)
-        msdata.to_csv('averagepca.csv', header=True, index=False)
+        # Round-trip the collapsed matrix through a CSV so its relabeled
+        # 3-row header reads back the same way the uncollapsed path reads
+        # the real file. Write it next to the input peak table (the run's
+        # output directory) rather than the process's current working
+        # directory, which in the deployed app is code/ -- this file is an
+        # internal scratch artifact, not something the user should find in
+        # the source tree.
+        avg_path = Path(file).with_name('averagepca.csv')
+        msdata.to_csv(avg_path, header=True, index=False)
 
-        msdata_header = pd.read_csv('averagepca.csv', sep=',', header=None,
+        msdata_header = pd.read_csv(avg_path, sep=',', header=None,
                                      index_col=[0, 1, 2]).iloc[:3, :].transpose()
-        pcadf = (pd.read_csv('averagepca.csv', sep=',', header=[2], index_col=[0])
+        pcadf = (pd.read_csv(avg_path, sep=',', header=[2], index_col=[0])
                  .drop(['m/z', 'Retention time (min)'], axis=1)
                  .transpose().astype(float).reset_index().rename(columns={'index': 'File'}))
     else:

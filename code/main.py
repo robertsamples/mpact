@@ -82,6 +82,10 @@ Check if low_memory=False increases ram usage for average grps?
 - potentially consider other database options like HMDB etc
 - fix up analysisinfo file output with better and more useful log ingo
 - add other ordination options like pca, pls-da, etc etc
+    ~DONE: the multivariate tab now offers PCA / NMDS / PLS-DA via a method
+    switcher (ordination.py, plotting.plot_ordination). Next candidate is
+    OPLS-DA (intentionally deferred -- no native sklearn support; see
+    devnotes.md "Multivariate ordination plot").
 - add custom keyword arguments for each plot to make calling them easier
 - make it so groups can be reordered in the groupsets widgets?
     ~model-layer support done: GroupSetModel.move() (groupsets.py), tested in

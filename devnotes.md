@@ -695,3 +695,160 @@ mid-session. Most recent follow-ups: heatmap W/S selection had no bounds
 clamping (`mv_heatmap`, could crash or silently wrap past either end of the
 feature list); the six per-plot dicts were consolidated into
 `PlotSlotRegistry` (`plotslots.py`). 65 passing tests.
+
+## Code review pass (dev branch, 2026-06-30)
+
+Full read-through of every hand-written, Qt-free module plus the docs and
+TODO block. The codebase is in good shape; findings were modest. Test count
+is now **159 passing** (the count above is stale).
+
+### Fixes applied on this branch (low-risk, test-validated)
+
+- **`MSFaST.py` `analysisinfo.txt` decon label was a copy-paste bug**: the
+  `if analysis_params.decon:` branch wrote "Features failing **blank**
+  filtering" (a verbatim copy of the blank-filter line above it). Corrected
+  to "Features failing in-source/deconvolution filtering". Confirmed against
+  `main.py`'s parallel data-review summary writer (`_finish_analysis`,
+  ~line 1208), which already labels the same quantity correctly as
+  "in-source ion filtering" — so the two writers now agree. Also fixed two
+  user-facing typos in the same file: "Runetime" -> "Runtime" and
+  "PCA unfitlered" -> "PCA unfiltered". These are pure string-label changes,
+  not the risky re-read logic the analysisinfo backlog item warns about.
+- **`MSFaST.run_MSFaST` latent `NameError` on `groupionlists`**: it was
+  only initialised inside `if analysis_params.grpave:`, but referenced
+  unconditionally further down (the `groupionlists['cv'/'relfil'/'insource']`
+  writes and the groups-column loop) and inside the blank-filter block.
+  The GUI hardcodes `grpave = True` (`main.py:~1335`), so this never fired
+  in practice, but a loaded session or a test with `grpave=False` would
+  crash. Added a defensive `groupionlists = {}` next to `ionfilters = {}`.
+  Behaviour unchanged when `grpave=True` (`parsionlists` reassigns it).
+- **Stray debug CSVs written to the current working directory** (which is
+  `code/` in the deployed app, per `run.bat`): `stats.py` wrote
+  `msdata_teststats_test.csv` (a debug-named file, never read back) and
+  `qdata.csv` (never read back — the canonical `-logq` goes into
+  `iondict.csv`), and `ordination.py` wrote `averagepca.csv` (an internal
+  collapse round-trip scratch file). All three now write into the run's
+  output directory: `<stem>_teststats.csv`, `<stem>_qvalues.csv`, and
+  `averagepca.csv` next to the input peak table respectively. The
+  pre-existing leftover copies sitting untracked in `code/`
+  (`qdata.csv`, `msdata_teststats_test.csv`, `averagepca.csv`) are now
+  obsolete and safe to delete — they will no longer be regenerated there.
+- **Dead code removal** (`stats.py` `groupave`): a per-injection
+  `variance_values`/`stddev_values` was computed but never used (the
+  technical/biological RSDs are derived from grouped means, not from it).
+  Removing it made the entire sum-of-squares accumulation chain dead too
+  (`sum_squares_list`/`sum_squares_chunk`/`all_sum_squares`/`sum_squares_df`),
+  so that's gone as well — a small but real per-chunk optimization (drops a
+  `(chunk ** 2).groupby(...).sum()` on every chunk of the formatted table).
+  Validated by `tests/test_msfast_pipeline.py`, which runs the real
+  `groupave` against the bundled example dataset. Also dropped an unused
+  `from pathlib import Path` in `MSFaST.py`.
+
+### Findings NOT changed (need a decision or live-GUI validation)
+
+- **The "Or Groups" Plot-Feature-Set control is functionally inert.** The
+  groupset editor has three lists — And (`listWidget_andgrps` -> `incl`),
+  Or (`listWidget_orgrps` -> `src`), Exclude (`listWidget_allgrps` ->
+  `excl`). `src` is edited, persisted to `.mpct`, and joined into the
+  descriptive name, but **`MSFaST.groupset.__init__` only filters on `incl`
+  and `excl` — it never applies `src`.** So a user can add groups to the
+  "Or" list and it silently changes nothing about which features are
+  selected/coloured. This is the most significant finding. It's *not* fixed
+  here because implementing the "feature present in at least one of `src`"
+  semantics changes which features plot — and `enumerate_inputs`'s default
+  "Features not in blanks" groupset already populates `src` with every
+  non-blank group, so turning `src` on would retroactively add a filter to
+  the default view. Needs the GUI run against real data to validate. Sketch
+  of the fix (in `groupset.__init__`, after the `excl`/`incl` passes):
+  ```python
+  if self.src:
+      pattern = '|'.join(' ' + str(g) for g in self.src)  # leading-space convention
+      iondict = iondict.loc[iondict['groups'].str.contains(pattern), 'groups'].to_frame()
+  ```
+  Decide first whether "Or" should be an independent constraint or whether
+  the default groupset should stop pre-filling `src`.
+- **`mspwriter.convert_to_msp` num-peaks loop is fragile.** `for frags in
+  sources: numpeaks = len(frags)` overwrites rather than accumulates, and
+  assumes `sources` is a list-of-one-list. It happens to be correct for the
+  only live caller (the decon path, where `ionmerge.sources == [[frag,...]]`),
+  but would silently miscount if ever called on a `relationalfilter`-shaped
+  merge (flat list of id strings) — `len(frags)` would then be a string
+  length and the inner `for fragment in frags:` would iterate characters.
+  Left as-is (single caller, wrapped in try/except), but worth hardening if
+  the MSP writer is ever reused.
+- **Docs repo-URL inconsistency.** `mkdocs.yml` `repo_url` and `docs/index.md`
+  link to `github.com/robertsamples/mpact` (the `origin` fork), but
+  `docs/installation.md`'s `git clone` line uses
+  `github.com/BalunasLab/mpact` (the `upstream`/lab repo). Pick one canonical
+  public URL and make all three consistent. Not changed because which one is
+  the intended *published* home is a call only you can make (both remotes
+  exist locally). `docs/index.md`'s stale "multivariate analysis (NMDS)"
+  feature blurb *was* updated to "(PCA/NMDS/PLS-DA)".
+
+- **Two orphaned/broken scratch scripts in `code/`.**
+  `npatlassearch.py` reads `npatlas.csv` (the real file is `npatlas.tsv`) at
+  module top level and references an undefined `indigo`/`renderer`, so it
+  would crash if ever imported/run — but nothing imports it.
+  `masstdriver.py` is referenced only by a commented-out import in
+  `ui_functions.py`. Both are dead leftover dev scratch, not part of the
+  running app. Flagged rather than deleted (pre-existing files; the auto-mode
+  classifier has blocked deleting UI-adjacent files before). Safe to remove
+  once you confirm you don't want them as references.
+
+### Already-logged items re-confirmed still open (see backlog above)
+
+- `exportgnps()` duplicating `translators.reindex_fragments` matching logic.
+- `iondict.csv` read-modify-write chain across `filter.py`/`stats.py`.
+- `run_MSFaST`'s blank-filter `_formatted.csv` re-read (the "risky kind").
+- Lazy per-tab plot updates; generalizing the `ui_plot` subclasses.
+
+### Test-suite assessment
+
+The suite is well-targeted and not redundant — each test guards a specific
+behaviour or a previously-fixed bug (the PLS-DA `scale=` regression, the
+replicate-collapse structure, the dendrogram purity edge cases, the
+end-to-end pipeline). No tests are recommended for removal. Gaps worth
+filling when convenient (all Qt-free, so headless-testable):
+- `translators.reindex_fragments` / `filter_source_peaktable` end-to-end on
+  the bundled MSP/MGF + peak tables (currently only smaller-unit coverage).
+- `getfragdb.importfrag` format auto-detection (Progenesis vs MS-DIAL MSP).
+- A `run_MSFaST` variant with `grpave=False`/minimal filters to lock in the
+  `groupionlists` defensive-init fix above.
+- `stats.runfc`/`runttest` numeric outputs (FC clamping, q-value monotonicity)
+  against a tiny synthetic `iondict.csv`.
+
+## Future feature dev plan (post-review, 2026-06-30)
+
+Candidate features, ordered roughly by value-to-effort. None started; all
+need the GUI runnable against real data to validate. Several already appear
+in `main.py`'s TODO block — this is the triaged version.
+
+1. **Wire up the "Or Groups" groupset constraint** (see finding above).
+   Smallest, highest-impact correctness item — a visible UI control that
+   currently does nothing. Backend change is a few lines; the work is
+   deciding the default-groupset interaction and validating in the GUI.
+2. **Data-quality score / summary** (TODO: "overall data quality score, AUC
+   on CV plot"). The pieces already exist (`average CV`/`median CV` columns
+   in `iondict.csv`, per-group RSDs in `_summarydata.csv`, the dendrogram
+   purity `n_pure/n_total` summary). A single headline QC number + a small
+   summary panel could be assembled Qt-free in a new `qualityscore.py`
+   module (testable) and surfaced on the Data Review tab.
+3. **OPLS-DA ordination method** (next item after the PCA/NMDS/PLS-DA rework,
+   already deferred — see "Multivariate ordination plot"). Needs either the
+   unmaintained `pyopls` or a from-scratch OSC implementation plus a
+   reference dataset to validate against.
+4. **Status-bar terminal/log viewer** (TODO). Replace the static status
+   strings with a live log line + an expandable full-output pane. Mostly a
+   Qt plumbing task (route the existing `print()` progress through a
+   `QPlainTextEdit`/signal); no scientific risk.
+5. **Additional databases beyond NPAtlas** (TODO: HMDB etc.). `dbsearch.py`
+   is already a clean Qt-free ppm-window matcher taking an `atlas` DataFrame
+   — adding a second source is mostly a loader + a column-name adapter, and
+   the matching core is reusable as-is.
+6. **`exportgnps()` migration onto `translators`** (backlog). Correctness +
+   maintenance win, not a new feature: replace the ~210-line hand-rolled
+   O(n·m) MGF matcher with the tested `reindex_fragments`/
+   `filter_source_peaktable` path.
+7. **Specificity/sensitivity & comparison-mode plots** (TODO, "likely items
+   that need more thought"). Larger scientific-design questions; needs spec
+   work with the lab before implementation.

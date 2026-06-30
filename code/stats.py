@@ -72,7 +72,6 @@ def groupave(analysis_params):
 
     # Initialize lists to collect results from each chunk
     sum_values_list = []
-    sum_squares_list = []
     counts_list = []
 
     # Process data in chunks
@@ -90,33 +89,29 @@ def groupave(analysis_params):
             # Set index names according to your data structure
             chunk_stacked.index.names = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']
 
-            # Compute sum, sum of squares, and counts per group
+            # Compute sum and counts per group
             group_levels = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']
             sum_values_chunk = chunk_stacked.groupby(level=group_levels).sum()
-            sum_squares_chunk = (chunk_stacked ** 2).groupby(level=group_levels).sum()
             count_chunk = chunk_stacked.groupby(level=group_levels).count()
 
             # Append results to lists
             sum_values_list.append(sum_values_chunk)
-            sum_squares_list.append(sum_squares_chunk)
             counts_list.append(count_chunk)
 
             pbar.update(1)
 
     # Concatenate all results
     all_sum_values = pd.concat(sum_values_list)
-    all_sum_squares = pd.concat(sum_squares_list)
     all_counts = pd.concat(counts_list)
 
     # Aggregate over the entire dataset
     sum_values_df = all_sum_values.groupby(level=group_levels).sum()
-    sum_squares_df = all_sum_squares.groupby(level=group_levels).sum()
     counts_df = all_counts.groupby(level=group_levels).sum()
 
-    # Calculate mean and variance per injection
+    # Calculate mean per injection. (A per-injection variance/stddev was
+    # computed here previously but never used -- the technical/biological
+    # RSDs below are derived from the grouped means, not from it.)
     mean_values = sum_values_df / counts_df
-    variance_values = (sum_squares_df / counts_df) - (mean_values ** 2)
-    stddev_values = variance_values ** 0.5
 
     # Calculate technical RSDs and counts
     # Group over technical replicates within each sample
@@ -251,9 +246,14 @@ def runttest(analysis_params, statstgrps, groupsets):
     msdata_teststats.loc[msdata_teststats['p'] <= minval, 'p'] = minval
     msdata_teststats['logp'] = np.log10(msdata_teststats['p']) 
     
-    # Save msdata_teststats
+    # Save msdata_teststats. Previously written to the current working
+    # directory as 'msdata_teststats_test.csv' (a debug-named file that
+    # littered code/ and was never read back); now written into the run's
+    # output directory under a descriptive name alongside the other outputs.
     msdata_teststats = msdata_teststats.reset_index([1, 2])
-    msdata_teststats.to_csv('msdata_teststats_test.csv', header=True, index=True)
+    msdata_teststats.to_csv(
+        analysis_params.outputdir / (analysis_params.filename.stem + '_teststats.csv'),
+        header=True, index=True)
     
     # Update iondict with -logp
     iondict['-logp'] = -msdata_teststats['logp']
@@ -301,7 +301,12 @@ def runttest(analysis_params, statstgrps, groupsets):
     
     # Save results to CSV files
     iondict = iondict.set_index('Compound')
-    iondict.to_csv('qdata.csv', index=True, header=True)
+    # Written into the run's output directory rather than the current working
+    # directory (was a bare 'qdata.csv' that landed in code/ and was never
+    # read back); the canonical -logq still goes into iondict.csv below.
+    iondict.to_csv(
+        analysis_params.outputdir / (analysis_params.filename.stem + '_qvalues.csv'),
+        index=True, header=True)
     iondict2 = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
     iondict2['-logq'] = np.nan
     iondict2.loc[iondict.index.tolist(), '-logq'] = iondict['-logq']
