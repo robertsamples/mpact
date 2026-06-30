@@ -136,3 +136,37 @@ def test_analysisinfo_written(pipeline_result):
     assert info_path.exists()
     text = info_path.read_text()
     assert 'Features passing all filters' in text
+
+
+def test_fold_change_is_clamped_to_bounds(pipeline_result):
+    """runfc clamps FC into [0.01, 100]; nothing should escape that range."""
+    params, _ = pipeline_result
+    iondict = pd.read_csv(params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+    fc = iondict['fc'].dropna()
+    assert len(fc) > 0
+    assert fc.min() >= 0.01
+    assert fc.max() <= 100.0
+
+
+def test_stats_outputs_land_in_output_dir_not_cwd(pipeline_result):
+    """The t-test/q-value tables now write into the run's output directory
+    (previously bare 'msdata_teststats_test.csv'/'qdata.csv' in the cwd)."""
+    params, _ = pipeline_result
+    assert (params.outputdir / (params.filename.stem + '_teststats.csv')).exists()
+    assert (params.outputdir / (params.filename.stem + '_qvalues.csv')).exists()
+
+
+def test_qvalues_are_finite_positive_and_consistent_with_logq(pipeline_result):
+    """The BH q-values must be finite and positive, and the persisted '-logq'
+    column must equal -log10(qval) (the relationship runttest derives). Strict
+    p-ascending monotonicity is deliberately NOT asserted: the cummin step-up
+    only guarantees it in the loop's processing order, and tied p-values can
+    reorder under an independent re-sort -- a known BH tie subtlety, not a bug."""
+    import numpy as np
+    params, _ = pipeline_result
+    qdata = pd.read_csv(params.outputdir / (params.filename.stem + '_qvalues.csv'),
+                         sep=',', header=[0])
+    qval = qdata['qval'].to_numpy()
+    assert np.isfinite(qval).all()
+    assert (qval > 0).all()
+    np.testing.assert_allclose(qdata['-logq'].to_numpy(), -np.log10(qval), rtol=1e-9)

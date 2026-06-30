@@ -746,27 +746,17 @@ is now **159 passing** (the count above is stale).
 
 ### Findings NOT changed (need a decision or live-GUI validation)
 
-- **The "Or Groups" Plot-Feature-Set control is functionally inert.** The
-  groupset editor has three lists — And (`listWidget_andgrps` -> `incl`),
-  Or (`listWidget_orgrps` -> `src`), Exclude (`listWidget_allgrps` ->
-  `excl`). `src` is edited, persisted to `.mpct`, and joined into the
-  descriptive name, but **`MSFaST.groupset.__init__` only filters on `incl`
-  and `excl` — it never applies `src`.** So a user can add groups to the
-  "Or" list and it silently changes nothing about which features are
-  selected/coloured. This is the most significant finding. It's *not* fixed
-  here because implementing the "feature present in at least one of `src`"
-  semantics changes which features plot — and `enumerate_inputs`'s default
-  "Features not in blanks" groupset already populates `src` with every
-  non-blank group, so turning `src` on would retroactively add a filter to
-  the default view. Needs the GUI run against real data to validate. Sketch
-  of the fix (in `groupset.__init__`, after the `excl`/`incl` passes):
-  ```python
-  if self.src:
-      pattern = '|'.join(' ' + str(g) for g in self.src)  # leading-space convention
-      iondict = iondict.loc[iondict['groups'].str.contains(pattern), 'groups'].to_frame()
-  ```
-  Decide first whether "Or" should be an independent constraint or whether
-  the default groupset should stop pre-filling `src`.
+- **The "Or Groups" (`src`) control not being applied is intended, NOT a
+  bug** (confirmed by the developer, 2026-06-30). The groupset editor has
+  three lists — And (`listWidget_andgrps` -> `incl`, feature must be in all),
+  Exclude (`listWidget_allgrps` -> `excl`, feature must not be in any), and
+  Or (`listWidget_orgrps` -> `src`, the groups a feature is *allowed* to
+  appear in). `MSFaST.groupset.__init__` deliberately filters only on `incl`
+  and `excl`: a feature that already satisfies And/Exclude is a member of the
+  groupset, and `src` ("allowed in") by design doesn't further remove it, so
+  there's nothing for `src` to do at filter time. This matches the observed
+  behaviour. (Earlier in this review pass it was mis-flagged as an inert
+  control — that was wrong; leaving the note here so it isn't re-flagged.)
 - **`mspwriter.convert_to_msp` num-peaks loop is fragile.** `for frags in
   sources: numpeaks = len(frags)` overwrites rather than accumulates, and
   assumes `sources` is a list-of-one-list. It happens to be correct for the
@@ -817,22 +807,32 @@ filling when convenient (all Qt-free, so headless-testable):
 - `stats.runfc`/`runttest` numeric outputs (FC clamping, q-value monotonicity)
   against a tiny synthetic `iondict.csv`.
 
+**Update (2026-06-30, second pass):** all four gaps above are now filled —
+`tests/test_translators_e2e.py`, `tests/test_getfragdb.py`,
+`tests/test_msfast_grpave_off.py`, `tests/test_stats_numeric.py`. Plus the
+three new subsystems below ship with their own Qt-free tests
+(`test_npatlasupdate.py`, `test_mpactupdate.py`, `test_crashreport.py`).
+
 ## Future feature dev plan (post-review, 2026-06-30)
 
 Candidate features, ordered roughly by value-to-effort. None started; all
 need the GUI runnable against real data to validate. Several already appear
 in `main.py`'s TODO block — this is the triaged version.
 
-1. **Wire up the "Or Groups" groupset constraint** (see finding above).
-   Smallest, highest-impact correctness item — a visible UI control that
-   currently does nothing. Backend change is a few lines; the work is
-   deciding the default-groupset interaction and validating in the GUI.
-2. **Data-quality score / summary** (TODO: "overall data quality score, AUC
-   on CV plot"). The pieces already exist (`average CV`/`median CV` columns
-   in `iondict.csv`, per-group RSDs in `_summarydata.csv`, the dendrogram
-   purity `n_pure/n_total` summary). A single headline QC number + a small
-   summary panel could be assembled Qt-free in a new `qualityscore.py`
-   module (testable) and surfaced on the Data Review tab.
+1. ~~Wire up the "Or Groups" groupset constraint~~ — **withdrawn**: not a
+   bug, the `src` "allowed in" semantics are intended (see finding above).
+2. ~~Data-quality score / summary~~ — **partially done.** The score the TODO
+   asked for already existed (Reproducibility / Skewness / Overall, from the
+   AUC of the CV rarefaction curve), but the math was buried untested inside
+   `plotting.prev_cv.plot()`. Extracted verbatim into the Qt-free, unit-tested
+   `qualityscore.py` (`compute_cv_quality`), pinned against a copy of the
+   original by `tests/test_qualityscore.py` so no displayed number changed;
+   `prev_cv` is now a thin draw-the-result wrapper. (Also fixed a latent pandas
+   FutureWarning in the extracted percentage assignment.) Remaining/optional:
+   surface the score outside the CV tab (e.g. Data Review summary), and fold in
+   the other available signals (per-group RSDs from `_summarydata.csv`, the
+   dendrogram purity `n_pure/n_total`) if a richer composite is wanted -- both
+   are scientific-design calls to make with the lab, not coded blind.
 3. **OPLS-DA ordination method** (next item after the PCA/NMDS/PLS-DA rework,
    already deferred — see "Multivariate ordination plot"). Needs either the
    unmaintained `pyopls` or a from-scratch OSC implementation plus a
@@ -852,3 +852,96 @@ in `main.py`'s TODO block — this is the triaged version.
 7. **Specificity/sensitivity & comparison-mode plots** (TODO, "likely items
    that need more thought"). Larger scientific-design questions; needs spec
    work with the lab before implementation.
+
+## New subsystems (2026-06-30, second pass)
+
+Three new Qt-free, unit-tested modules plus thin GUI wiring in `main.py`. The
+cores are fully testable headlessly (network/git/dialog all injected); the
+GUI wiring (`MainWindow._run_startup_checks`/`_check_atlas_freshness`/
+`_check_app_update` and the `__main__` crash-dialog) is the only part that
+needs a live launch to verify. **No new hard dependencies** — all three use
+only the stdlib (`urllib`, `json`, `subprocess`, `webbrowser`, `platform`)
+plus `packaging` (already present, with a tuple-comparison fallback), so
+`requirements.txt`/the portable build are unaffected.
+
+### NPAtlas auto-updater (`npatlasupdate.py`, `tests/test_npatlasupdate.py`)
+
+On startup (deferred via `QTimer.singleShot` so the window paints first), if
+`npatlas.tsv` is missing or its mtime is > 30 days old, the user is asked
+whether to re-download it from
+`https://www.npatlas.org/static/downloads/NPAtlas_download.tsv`. The download
+streams to a temp file, is **validated** (header must contain the columns the
+app uses — `compound_id`/`compound_m_plus_h`/`compound_m_plus_na`/
+`compound_smiles`/`origin_type`/`genus`) and only then `os.replace`-d over the
+existing file, so a server error page / partial transfer / network drop can
+never clobber a working atlas.
+
+- **Format decision (asked: would changing format help?): no — stay on TSV.**
+  `main.py` reads the atlas with `pd.read_csv(sep='\t')` and `dbsearch` keys
+  off the specific columns above; the published `NPAtlas_download.tsv` already
+  has exactly those, so it's a drop-in. The `NPAtlas_download.json` is the
+  same data in a nested shape that would need flattening before pandas/dbsearch
+  could touch it — pure cost, no benefit. The `.json` URL is recorded in the
+  module (`DEFAULT_JSON_URL`) only for completeness.
+- **Refactor evaluation (asked): minimal and not needed now.** `dbsearch.py`
+  is already the clean Qt-free matcher; the only related cleanup is that the
+  atlas read in `main.py:enumerate_inputs` (`pd.read_csv('npatlas.tsv', ...)`)
+  is hardcoded to that filename/cwd — the updater writes to the same path, so
+  no change required. If a second database is added later (HMDB etc., dev-plan
+  item 5), factor the atlas load + column-name mapping into a small loader then.
+- **Threading caveat:** the 33 MB download currently runs on the main thread
+  behind a wait cursor. It's a user-confirmed, infrequent (>30-day-gated)
+  action so blocking briefly is acceptable, but moving it onto a `QThread`
+  worker (like `AnalysisWorker`) is the obvious future improvement — left out
+  here because GUI threading can't be verified headlessly.
+
+### MPACT self-update checker (`mpactupdate.py`, `tests/test_mpactupdate.py`)
+
+On startup, queries the GitHub Releases API for the configured repo
+(`robertsamples/mpact` by default — Robert's fork), compares the latest
+published release tag against the running version (`__version__`, kept in
+`mpactupdate.py`; **keep it in sync with `main.py`'s `label_credits`** string,
+currently `v1.00.01` -> `__version__ = '1.0.1'`), and if newer offers a
+`git pull --ff-only` update (with a "please restart" prompt on success, or
+opens the release page on failure). Version compare uses `packaging.version`
+(PEP 440, numeric — so 2.10 > 2.9) with a dotted-int fallback; an unparseable
+tag is treated as "not newer" (never nags). Every failure mode (offline, no
+releases yet/404, malformed JSON, no git) is non-fatal and silent.
+
+- **Updater-framework evaluation (asked): no off-the-shelf framework.** The
+  standard option, `pyupdater`, targets *frozen* PyInstaller/cx_Freeze apps
+  and needs its own patch-server + signing setup — heavyweight for a tool run
+  from a git clone. For a source checkout the meaningful update is `git pull`,
+  and "is there a newer release" is one API call + a version compare, which is
+  all this module is. **Action needed from you:** tag releases on the fork
+  (e.g. `v1.0.1`) and bump `__version__` per release, or this finds nothing.
+- For the *portable PyInstaller build* (no git), `apply_git_update` will fail
+  gracefully and the user is sent to the release page to download manually —
+  a real auto-updater for the frozen build is the `pyupdater`-shaped project
+  to consider only if/when that distribution channel matters.
+
+### Crash / error reporter (`crashreport.py`, `tests/test_crashreport.py`)
+
+Installs a `sys.excepthook` (after `QApplication` exists) that, on any
+unhandled exception: chains to the default hook (traceback still hits the
+console), formats a full report (traceback + MPACT/Python/platform versions +
+timestamp + optional context), writes it to a timestamped file under
+`~/.mpact/crashlogs/`, and shows a dialog offering to open a **prefilled
+GitHub issue** (title + fenced traceback body) in the browser. Nothing is sent
+without the user clicking through. The excepthook is hardened to never raise.
+
+- **Crash-logger-framework evaluation (asked): Sentry is the off-the-shelf
+  option, deliberately not used.** `sentry-sdk` is built for hosted/web
+  services: it sends events to a Sentry project by default (silent cloud
+  egress — wrong default for a desktop research tool), needs a DSN/account
+  provisioned, and *still* needs a custom `before_send` hook + dialog to honour
+  "ask the user first." The local-log + prefilled-GitHub-issue flow gives the
+  maintainer the same thing (a complete traceback) with zero infrastructure
+  and no privacy surprise. If MPACT later ships to many non-technical users and
+  a central error feed becomes worthwhile, Sentry with `before_send` gating is
+  the documented upgrade path (noted in `crashreport.py`).
+- **PyQt5 note to verify live:** PyQt5 routes unhandled exceptions raised
+  inside Qt slots through `sys.excepthook` (then may abort), so this should
+  catch most in-GUI crashes — but the exact abort-after-hook behaviour is
+  PyQt5-version-dependent and is the one thing to confirm by actually
+  triggering an error in the running app.

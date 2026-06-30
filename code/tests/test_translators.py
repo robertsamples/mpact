@@ -200,3 +200,21 @@ def test_parse_real_fragment_files(name):
     entries = t.parse_fragments(path)
     assert len(entries) > 0
     assert all(e.mz is not None for e in entries)
+
+
+def test_reindex_real_progenesis_msp_against_real_peaktable(tmp_path):
+    """End-to-end reindex on the bundled Progenesis MSP + peak table -- the
+    compound-id fast path should match (nearly) every entry, and the output
+    must be parseable and renumbered into ascending row order."""
+    pk = REPO_ROOT / 'progenesis.csv'
+    msp = REPO_ROOT / 'progenesis.msp'
+    if not (pk.exists() and msp.exists()):
+        pytest.skip('progenesis example files not present')
+    out = tmp_path / 'reindexed.msp'
+    n = t.reindex_fragments(pk, msp, out)
+    assert n > 0
+    # Output parses back to exactly the matched count, with assigned scan numbers.
+    reparsed = t.parse_msp(out)
+    assert len(reparsed) == n
+    text = out.read_text()
+    assert 'SCANNUMBER:' in text
