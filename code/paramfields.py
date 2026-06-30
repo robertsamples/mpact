@@ -23,7 +23,6 @@ than abstracted into a generic table.
 CHECKBOX_FIELDS = (
     ('PCA', ('ui', 'checkBox_pca')),
     ('Dendrogram', ('ui', 'checkBox_dend')),
-    ('bootstrap', ('dialog.ui', 'checkBox_bootstrap')),
     ('MZRTplt', ('ui', 'checkBox_mzrt')),
     ('KMD', ('ui', 'checkBox_kmd')),
     ('mdguide', ('dialog.ui', 'checkBox_mdguide')),

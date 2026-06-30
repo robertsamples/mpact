@@ -83,7 +83,14 @@ class UIFunctions(MainWindow):
         self.ui.frame_plts.hide()
         self.ui.checkBox_fc.hide()
         self.ui.checkBox_ttest.hide()
-        self.dialog.ui.checkBox_bootstrap.setChecked(True)
+        # "Bootstrap Analysis" and "Collapse Technical Replicates" moved
+        # from this global plot-config dialog onto their one relevant
+        # plot's own switcher bar (plot_dendrogram's "Bootstrap" checkbox,
+        # plot_ordination's "Collapse Replicates" checkbox) -- hide the
+        # now-orphaned dialog widgets rather than editing the generated
+        # ui_plotparam.py.
+        self.dialog.ui.frame_bootstrap.hide()
+        self.dialog.ui.frame_2.hide()
 
         # Top bar functions
         self.ui.btn_maximize.clicked.connect(lambda: UIFunctions.maximize_restore(self))
@@ -117,8 +124,8 @@ class UIFunctions(MainWindow):
         self.ui.btn_cvplt.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(2))
         self.ui.btn_datasummary.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(3))
         
-        self.ui.btn_upsetplt.clicked.connect(lambda: self.ui.stackedWidget_grpanalysis.setCurrentIndex(0))
-        self.ui.btn_samplecorr.clicked.connect(lambda: self.ui.stackedWidget_grpanalysis.setCurrentIndex(1))
+        self.ui.btn_upsetplt.clicked.connect(lambda: UIFunctions.switch_grpanalysis_tab(self, 0))
+        self.ui.btn_samplecorr.clicked.connect(lambda: UIFunctions.switch_grpanalysis_tab(self, 1))
 
         #feature info bar functions
         self.ftrdialog.ui.btn_close.clicked.connect(lambda: self.ftrdialog.hide())  
@@ -211,6 +218,8 @@ class UIFunctions(MainWindow):
             self.dbsearchdone = True
             stop_functime('dbsearch complete')
             reset_runtime()
+        elif not self.analysisrun:
+            self.error('Run an analysis before searching.')
             
     #plotbar functions
     def goto_review(self):
@@ -220,6 +229,15 @@ class UIFunctions(MainWindow):
         self.ui.btn_review.setStyleSheet(self.ui.plotbar_activebtn)
         
         self.dialog.ui.checkBox_applyfilter.hide()
+
+    def switch_grpanalysis_tab(self, idx):
+        """Switch the Group Analysis sub-tab (UpSet Plot=0, Sample
+        Correlations=1) and grey out plot_samplecorr's Method/View/Use-Names
+        controls -- shared with btn_upsetplt/btn_samplecorr in frame_12 --
+        whenever the UpSet Plot tab is active, since they don't apply there."""
+        self.ui.stackedWidget_grpanalysis.setCurrentIndex(idx)
+        if getattr(self, 'samplecorr', None) is not None:
+            self.samplecorr.set_controls_enabled(idx == 1)
 
     def goto_upset(self):
         self.ui.stackedWidget_infobar.setCurrentIndex(1)

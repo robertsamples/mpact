@@ -13,11 +13,10 @@ pd.options.mode.chained_assignment = None  # default='warn'
 import time
 import string
 
-import platform
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QMainWindow, QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
-from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
-from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
+from PyQt5.QtWidgets import QMainWindow, QSizeGrip
+from PyQt5.QtCore import QObject, Qt
+from PyQt5.QtGui import QPixmap
 from pathlib import Path
 
 # Install/verify non-stock dependencies (epam.indigo, UpSetPlot, squarify)
@@ -35,14 +34,14 @@ from ui_functions import *
 import files
 
 from MSFaST import run_MSFaST, analysis_parameters
-from groupsets import GroupSet, GroupSetModel, build_query_dict
+from groupsets import GroupSetModel, build_query_dict
 from plotslots import PlotSlotRegistry
 from paramfields import save_checkbox_fields
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 from biogroups import compute_biological_groups
 from dbsearch import search_npatlas
 from searchtree import SearchTreePanel
-from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
+from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_ordination, prev_cv, plot_upset, plot_treemap
 import getfragdb
 
 from indigo import Indigo
@@ -71,27 +70,31 @@ Check if low_memory=False increases ram usage for average grps?
 -add bypass for plots based on checkmark. possibly use if check: ... else: button.hide() then pass
 
 - distribution of CVs on bottom of cvplt?
-- add pca option and allow visualization of key features on multivar plt?
 
 #TODO#
-- in source spectra viewer in tab plot
-- do overall data quality score, AUC
+- in source spectra viewer in spectrum details tab plot with preexisting in source fragment deconvolution algoirthm
+- clean up import sections and general code for better maintability and good syntax/standards
+    ~main.py's own import section done (dead PyQt5/stdlib/groupsets imports removed,
+    verified unused via pyflakes + grep, no behavior change); other files not yet swept
+- do overall data quality score, AUC on CV plot or something, may be present in a different form already
 - standardize method and class names
-- database management, options
-- fix up analysisinfo file output
-
-- mzmine msp file import
-- add other ordination options
+- add terminal output with current line to status bar instead of just static status messages, perhaps with expand button to show full terminal output
+- potentially consider other database options like HMDB etc
+- fix up analysisinfo file output with better and more useful log ingo
+- add other ordination options like pca, pls-da, etc etc
 - add custom keyword arguments for each plot to make calling them easier
-- add runcheck before searching when switching to search tab
-- Figure out way to have only active plot be updated and then to update others
-    when plot is switched
-- make it so groups can be reordered
+- make it so groups can be reordered in the groupsets widgets?
+    ~model-layer support done: GroupSetModel.move() (groupsets.py), tested in
+    test_groupsets.py. UI drag-drop wiring (listWidget_pltgrps InternalMove +
+    syncing its rowsMoved signal to model.move()) not done -- needs a live
+    GUI session to verify the selection-tracking interacts correctly with
+    updatesets()'s existing blockSignals dance, which isn't something to
+    guess at unverified
 - consider if indexing and feature highly functions in plot options have any easy wins for optimization or disk use. (prob not)
 - make goto buttons just one class and lambda an index for the stacked widgets
     when connecting!
 
-
+likely items that need more thought and planning
 - maybe have a comparison mode for many different strains with and without elicitor
 - specificity/sensitivity plot
 - other statistical models
@@ -238,7 +241,15 @@ class MainWindow(QMainWindow):
         
         self.ui.setupUi(self)
         self.ui.label_credits.setText('v1.00.01 r26.06.29')
-                
+
+        # "PCA" was a misnomer left over from when this checkbox/button only
+        # ran NMDS (see plotting.plot_ordination) -- the underlying
+        # checkBox_pca objectName/analysis_params.PCA attribute stay
+        # unchanged for .mpct save-file compatibility; only the visible text
+        # and tooltip change.
+        self.ui.checkBox_pca.setText('Multivariate')
+        self.ui.btn_pca.setToolTip('Multivariate Ordination (PCA/NMDS/PLS-DA)')
+
         #initialize other dialog windows
         self.dialog = dialog()
         self.ftrdialog = ftrdialog()
@@ -759,6 +770,13 @@ class MainWindow(QMainWindow):
             )
             self.canvas['kmd'].draw_idle()
 
+        # Update the multivariate plot's loadings-view highlight (a separate
+        # concept from its scores view, which highlights a clicked *sample*
+        # via parent.pickedsample, not a feature -- so this only applies
+        # when self.pca exists and is currently showing loadings).
+        if getattr(self, 'pca', None) is not None:
+            self.pca.highlight_loading(self.pickedfeature, self.highlightcol)
+
         # Update feature plot with the selected feature
         self.highlight['featureplt'].set_data(
             [iondict.loc[self.pickedfeature, 'Retention time (min)']],
@@ -1038,6 +1056,11 @@ class MainWindow(QMainWindow):
         dfs = self.filtereddfs
         grpsts = self.groupsets
 
+        self._create_or_reset('treemap', 'treemap',
+            lambda: plot_treemap(self, 'treemap', self.ui.frame_treemap, pltfile, '', ''),
+            lambda: self.treemap.reset(pltfile, '', ''))
+        stop_functime('treemap complete')
+
         if params.CVfil:
             self._create_or_reset('prevcv', 'CV plot',
                 lambda: prev_cv(self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none'),
@@ -1055,10 +1078,10 @@ class MainWindow(QMainWindow):
         stop_functime('dendrogram complete')
 
         if params.PCA:
-            self._create_or_reset('pca', 'PCA/NMDS plot',
-                lambda: plot_PCA(self, 'pca', self.ui.frame_pca, pltfile, '', ''),
+            self._create_or_reset('pca', 'multivariate ordination plot',
+                lambda: plot_ordination(self, 'pca', self.ui.frame_pca, pltfile, '', ''),
                 lambda: self.pca.reset(pltfile, '', ''))
-            stop_functime('nmds complete')
+            stop_functime('ordination complete')
 
         if params.FC3Dplt:
             self._create_or_reset('fc3d', '3D fold-change plot',
@@ -1100,6 +1123,11 @@ class MainWindow(QMainWindow):
             lambda: plot_samplecorr(self, 'samplecorr', self.ui.frame_samplecorr, iondictfile, dfs, grpsts),
             lambda: self.samplecorr.reset(iondictfile, dfs, grpsts))
         stop_functime('samplecorr complete')
+
+        self._create_or_reset('upset', 'upset plot',
+            lambda: plot_upset(self, 'upset', self.ui.frame_upset, iondictfile, '', ''),
+            lambda: self.upset.reset(iondictfile, '', ''))
+        stop_functime('upsetplt complete')
 
     def run_analysis(self):
         # Ignore re-clicks while an analysis is already running on the worker thread.
@@ -1153,12 +1181,6 @@ class MainWindow(QMainWindow):
             self.ui.btn_run.setEnabled(True)
 
     def _finish_analysis(self):
-        try:
-            gen_treemap(self)  # move back to end
-        except Exception:
-            print("not generating tremap due to an error")
-        stop_functime('treemap complete')
-        
         # Used for point opacity based on abundance colouring
         iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         self.analysis_paramsgui.maxval = iondict['logmax'].max()
@@ -1206,11 +1228,6 @@ class MainWindow(QMainWindow):
             self.fillfttree()
             self.dbsearchdone = True
         
-        try:
-            gen_upsetplt(self)
-        except Exception:
-            print("not generating upset plot due to an error")
-        stop_functime('upsetplt complete')
         self.ui.label_status.setText('Analysis Complete')
         stop_functime('analysis complete')
         print('')

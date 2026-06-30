@@ -59,5 +59,4 @@ nav:
       - Heatmap: plots/heatmap.md
   - Feature Info: feature-info.md
   - Troubleshooting: troubleshooting.md
-  - Development: development.md
   - Changelog: changelog.md

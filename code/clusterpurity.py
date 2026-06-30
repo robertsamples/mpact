@@ -1,0 +1,108 @@
+"""
+MPACT
+Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+
+Qt-free dendrogram "purity" coloring: a branch is colored green if every
+leaf beneath it shares the same group label -- i.e. that group is a
+monophyletic clade, it clustered together before merging with anything
+else -- and left at the default color otherwise. Used by the dendrogram tab
+to make it visually obvious whether technical replicates of one Sample
+cluster tightly together, and separately whether biological replicates of
+one Biolgroup are well separated from other groups.
+
+Default colors are green/magenta rather than the more conventional
+green/red -- red-green colorblindness (the most common form) makes the two
+indistinguishable; magenta stays distinguishable from green under all
+common forms of color vision deficiency.
+
+This module is Qt-free and unit-tested (see ``tests/test_clusterpurity.py``).
+"""
+
+
+def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='magenta', neutral_color='black'):
+    """Build a ``link_color_func`` for ``scipy.cluster.hierarchy.dendrogram``.
+
+    Three-way coloring, classified by comparing the two children's label
+    sets (not by simply asking "is the merge result impure", which would
+    paint every ancestor of a single mixing event false_color all the way to
+    the root):
+
+    - ``true_color`` ("monophyletic"): the two children's label sets are
+      identical and contain exactly one label -- every leaf under this link
+      shares one label.
+    - ``false_color`` ("polyphyletic"): the two children's label sets
+      *overlap* (share at least one label) without being identical-and-
+      singleton -- this is definitive proof that some label's leaves are
+      split apart by this exact merge (some of that label is on each side),
+      i.e. genuinely non-monophyletic, not just "still impure from before".
+    - ``neutral_color``: the two children's label sets are *disjoint* (no
+      label in common) -- this merge simply joins two regions that don't
+      contradict each other; it's a clean bridge even if one or both
+      children are themselves impure from a *different* label's tangle
+      further down. This is what keeps a single low-level tangle from
+      cascading false_color all the way up the tree: once a tangled label's
+      clade stops growing (nothing more of that label to fold in), every
+      merge above it only ever joins disjoint regions, so it reverts to
+      ``neutral_color``.
+
+    Args:
+        Z: linkage matrix (``scipy.cluster.hierarchy.linkage`` or
+            fastcluster's drop-in) built on observations in the same order
+            as ``leaf_labels``.
+        leaf_labels: sequence, length == number of observations clustered by
+            ``Z``, giving each leaf's group label (e.g. its Sample or
+            Biolgroup), in the same order as the data passed to ``linkage``.
+
+    Returns:
+        callable: ``link_color_func(k)`` as expected by ``dendrogram``'s
+        ``link_color_func`` argument.
+    """
+    n_leaves = len(leaf_labels)
+    leaf_label_sets = {i: {leaf_labels[i]} for i in range(n_leaves)}
+    colors = {}
+    for i, row in enumerate(Z):
+        a, b = int(row[0]), int(row[1])
+        node_id = n_leaves + i
+        set_a, set_b = leaf_label_sets[a], leaf_label_sets[b]
+        merged = set_a | set_b
+        leaf_label_sets[node_id] = merged
+        if len(merged) == 1:
+            colors[node_id] = true_color
+        elif set_a.isdisjoint(set_b):
+            colors[node_id] = neutral_color
+        else:
+            colors[node_id] = false_color
+    return lambda k: colors.get(k, neutral_color)
+
+
+def purity_summary(Z, leaf_labels):
+    """Count how many distinct group labels form one pure clade each.
+
+    A label is "pure" only if *every* leaf carrying that label ends up
+    together in one clade before that clade merges with any other leaf --
+    i.e. the group is exactly monophyletic in the dendrogram. (A node whose
+    descendants are a uniform-but-incomplete subset of a label -- e.g. 2 of
+    a Sample's 3 technical replicates -- does NOT count: the third
+    replicate clustering elsewhere means that Sample isn't really pure.)
+
+    Returns:
+        (n_pure, n_total): number of distinct labels that are fully pure
+        clades, out of the total number of distinct labels in
+        ``leaf_labels``.
+    """
+    n_leaves = len(leaf_labels)
+    leaf_index_sets = {i: frozenset((i,)) for i in range(n_leaves)}
+    target_sets = {
+        label: frozenset(i for i in range(n_leaves) if leaf_labels[i] == label)
+        for label in set(leaf_labels)
+    }
+    pure_labels = set()
+    for i, row in enumerate(Z):
+        a, b = int(row[0]), int(row[1])
+        node_id = n_leaves + i
+        merged = leaf_index_sets[a] | leaf_index_sets[b]
+        leaf_index_sets[node_id] = merged
+        for label, target in target_sets.items():
+            if merged == target:
+                pure_labels.add(label)
+    return len(pure_labels), len(target_sets)
