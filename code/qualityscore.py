@@ -1,6 +1,6 @@
 """
 MPACT
-Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Copyright 2026, Robert M. Samples
 
 Qt-free extraction of the data-quality metrics shown on the CV (coefficient of
 variation) rarefaction plot tab. These numbers -- Reproducibility, Skewness,

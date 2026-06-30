@@ -1,6 +1,6 @@
 """
 MPACT
-Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Copyright 2026, Robert M. Samples
 
 Qt-free self-update checker. Queries the GitHub Releases API for the MPACT
 repository (Robert Samples' fork, ``robertsamples/mpact``, by default),

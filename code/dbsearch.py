@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Qt-free Natural Products Atlas (NPAtlas) mass-matching search, extracted
 from MainWindow.fulldbsearch so the ppm-window adduct matching logic can be

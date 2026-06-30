@@ -1,6 +1,6 @@
 """
 MPACT
-Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Copyright 2026, Robert M. Samples
 
 Qt-free updater for the bundled Natural Products Atlas database
 (``npatlas.tsv``). The Natural Products Atlas (https://www.npatlas.org)

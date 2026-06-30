@@ -1,6 +1,6 @@
 """
 MPACT
-Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Copyright 2026, Robert M. Samples
 
 Dark-themed QMessageBox helpers, matching the main GUI palette so the app's
 dialogs don't render with invisible black-on-black text (the default when a

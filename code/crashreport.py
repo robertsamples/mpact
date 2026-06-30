@@ -1,6 +1,6 @@
 """
 MPACT
-Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Copyright 2026, Robert M. Samples
 
 Qt-free crash/error reporting. Installs a ``sys.excepthook`` that, on any
 otherwise-unhandled exception:

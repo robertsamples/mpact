@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Qt-free multivariate ordination backend: PCA, NMDS, and PLS-DA on the
 samples x features intensity matrix, plus the data prep (technical-replicate
