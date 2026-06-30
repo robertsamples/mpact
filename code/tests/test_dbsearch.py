@@ -66,6 +66,47 @@ def test_no_match_outside_ppm_window(tmp_path):
     assert hitdb['c2'].empty
 
 
+def _write_single_feature(tmp_path, mz):
+    """One-feature filtered table + matching iondict, for the ordering tests."""
+    stem = 'example'
+    pd.DataFrame({'Compound': ['feat'], 'other': [1]}).to_csv(tmp_path / 'iondict.csv', index=False)
+    with open(tmp_path / (stem + '_filtered.csv'), 'w') as f:
+        f.write(',,\n,,\nCompound,m/z,Retention time (min)\n')
+        f.write('feat,%s,1.0\n' % mz)
+    return tmp_path, stem
+
+
+def test_hits_sorted_by_ppm_across_both_adducts(tmp_path):
+    # m+h matches A (~20 ppm) and B (~30 ppm); m+na matches C (~5 ppm).
+    # The combined result must be ascending by ppm: C, A, B.
+    atlas = pd.DataFrame({
+        'compound_name': ['A', 'B', 'C'],
+        'compound_m_plus_h': [200.000, 200.010, 999.0],
+        'compound_m_plus_na': [999.0, 999.0, 200.005],
+    })
+    outputdir, stem = _write_single_feature(tmp_path, 200.004)
+    hitdb, _ = search_npatlas(outputdir, stem, atlas, ppm_threshold=100)
+    hits = hitdb['feat']
+    assert list(hits['compound_name']) == ['C', 'A', 'B']
+    assert list(hits['ppm']) == sorted(hits['ppm'])  # ascending
+
+
+def test_single_atlas_row_matching_both_adducts_appears_twice(tmp_path):
+    # One atlas row whose [M+H] and [M+Na] are both at the feature mass must
+    # appear once per adduct (two rows), matching the old concat behaviour.
+    atlas = pd.DataFrame({
+        'compound_name': ['D'],
+        'compound_m_plus_h': [300.000],
+        'compound_m_plus_na': [300.000],
+    })
+    outputdir, stem = _write_single_feature(tmp_path, 300.000)
+    hitdb, _ = search_npatlas(outputdir, stem, atlas, ppm_threshold=10)
+    assert len(hitdb['feat']) == 2
+    assert list(hitdb['feat']['compound_name']) == ['D', 'D']
+    on_disk = pd.read_csv(outputdir / 'iondict.csv', index_col=0)
+    assert on_disk.loc['feat', 'hits'] == 2
+
+
 def test_invalidates_stale_cached_reads_under_other_shapes(tmp_path):
     """Regression guard: fillfttree() (main.py) reads iondict.csv with
     header=[0], index_col=None -- a different cache key than

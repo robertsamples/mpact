@@ -48,6 +48,7 @@ import webbrowser
 import npatlasupdate
 import mpactupdate
 import crashreport
+from dialogs import styled_message_box
 
 from indigo import Indigo
 from indigo.renderer import IndigoRenderer
@@ -573,12 +574,12 @@ class MainWindow(QMainWindow):
             return
         age = npatlasupdate.atlas_age_days(atlas_path)
         age_msg = 'missing' if age is None else ('about %d days old' % int(age))
-        reply = QtWidgets.QMessageBox.question(
-            self, 'Update Natural Products Atlas?',
+        reply = styled_message_box(
+            self, QtWidgets.QMessageBox.Question, 'Update Natural Products Atlas?',
             'Your local Natural Products Atlas database is %s.\n\n'
             'Download the latest copy from npatlas.org now (about 30 MB)?' % age_msg,
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No)
+            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            default=QtWidgets.QMessageBox.No)
         if reply != QtWidgets.QMessageBox.Yes:
             return
         # The download is large and runs on the main thread (wait cursor); a
@@ -604,20 +605,20 @@ class MainWindow(QMainWindow):
         notes = (info.notes or '').strip()
         if len(notes) > 800:
             notes = notes[:800] + '...'
-        reply = QtWidgets.QMessageBox.question(
-            self, 'MPACT update available',
+        reply = styled_message_box(
+            self, QtWidgets.QMessageBox.Question, 'MPACT update available',
             'A newer MPACT release is available.\n\n'
             'Installed: %s\nLatest: %s\n\n%s\n\n'
             'Update now (git pull)?' % (info.current, info.latest, notes),
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No)
+            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            default=QtWidgets.QMessageBox.No)
         if reply != QtWidgets.QMessageBox.Yes:
             return
         repo_dir = Path(__file__).resolve().parent.parent
         ok, output = mpactupdate.apply_git_update(repo_dir)
         if ok:
-            QtWidgets.QMessageBox.information(
-                self, 'Update complete',
+            styled_message_box(
+                self, QtWidgets.QMessageBox.Information, 'Update complete',
                 'MPACT was updated. Please restart the application.\n\n' + output)
         else:
             self.error('Automatic update failed; opening the release page instead.')
@@ -1475,19 +1476,17 @@ if __name__ == "__main__":
     # See crashreport.py for the design (and why not Sentry).
     def _crash_dialog(report, log_path, issue_url):
         try:
-            box = QtWidgets.QMessageBox()
-            box.setIcon(QtWidgets.QMessageBox.Critical)
-            box.setWindowTitle('MPACT encountered an error')
             text = 'An unexpected error occurred.'
             if log_path:
                 text += '\n\nA crash log was saved to:\n' + log_path
             text += ('\n\nReport this on GitHub? Your browser will open a '
                      'prefilled issue — nothing is sent automatically.')
-            box.setText(text)
-            box.setDetailedText(report)
-            box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            box.setDefaultButton(QtWidgets.QMessageBox.No)
-            if box.exec_() == QtWidgets.QMessageBox.Yes and issue_url:
+            if styled_message_box(
+                    None, QtWidgets.QMessageBox.Critical,
+                    'MPACT encountered an error', text,
+                    buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    default=QtWidgets.QMessageBox.No,
+                    detailed=report) == QtWidgets.QMessageBox.Yes and issue_url:
                 webbrowser.open(issue_url)
         except Exception:
             pass

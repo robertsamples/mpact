@@ -766,14 +766,12 @@ is now **159 passing** (the count above is stale).
   length and the inner `for fragment in frags:` would iterate characters.
   Left as-is (single caller, wrapped in try/except), but worth hardening if
   the MSP writer is ever reused.
-- **Docs repo-URL inconsistency.** `mkdocs.yml` `repo_url` and `docs/index.md`
-  link to `github.com/robertsamples/mpact` (the `origin` fork), but
-  `docs/installation.md`'s `git clone` line uses
-  `github.com/BalunasLab/mpact` (the `upstream`/lab repo). Pick one canonical
-  public URL and make all three consistent. Not changed because which one is
-  the intended *published* home is a call only you can make (both remotes
-  exist locally). `docs/index.md`'s stale "multivariate analysis (NMDS)"
-  feature blurb *was* updated to "(PCA/NMDS/PLS-DA)".
+- ~~Docs repo-URL inconsistency~~ — **resolved.** Canonical repo is
+  `github.com/robertsamples/mpact` (confirmed by the developer);
+  `docs/installation.md`'s `git clone` line was corrected from `BalunasLab` to
+  `robertsamples` to match `mkdocs.yml`/`docs/index.md`. `docs/index.md`'s
+  stale "multivariate analysis (NMDS)" blurb was also updated to
+  "(PCA/NMDS/PLS-DA)".
 
 - **Two orphaned/broken scratch scripts in `code/`.**
   `npatlassearch.py` reads `npatlas.csv` (the real file is `npatlas.tsv`) at
@@ -901,7 +899,7 @@ On startup, queries the GitHub Releases API for the configured repo
 (`robertsamples/mpact` by default — Robert's fork), compares the latest
 published release tag against the running version (`__version__`, kept in
 `mpactupdate.py`; **keep it in sync with `main.py`'s `label_credits`** string,
-currently `v1.00.01` -> `__version__ = '1.0.1'`), and if newer offers a
+currently `v1.00.01` -> `__version__ = '1.0.01'`), and if newer offers a
 `git pull --ff-only` update (with a "please restart" prompt on success, or
 opens the release page on failure). Version compare uses `packaging.version`
 (PEP 440, numeric — so 2.10 > 2.9) with a dotted-int fallback; an unparseable
@@ -945,3 +943,82 @@ without the user clicking through. The excepthook is hardened to never raise.
   catch most in-GUI crashes — but the exact abort-after-hook behaviour is
   PyQt5-version-dependent and is the one thing to confirm by actually
   triggering an error in the running app.
+
+### Dialog styling (`dialogs.py`, `tests/test_dialogs.py`)
+
+The three subsystems above all pop `QMessageBox` dialogs. On the live app these
+first rendered **black-on-black** (an unstyled dark background with invisible
+black text — confirmed from a user screenshot): a `QMessageBox` inherits the
+app's dark look but ships no text/background colours of its own.
+`dialogs.styled_message_box()` applies a stylesheet matching the GUI palette
+(background `rgb(40,40,40)`, text `rgb(212,212,212)`, detailed-text `QTextEdit`
+darkened too) so every app dialog is legible and on-theme. Kept in its own
+module (not `main.py`) so the box construction is headless-testable via
+offscreen Qt (`build_message_box` returns the box without the blocking
+`exec_`); `main.py`'s atlas/update/crash prompts all route through it.
+
+Two follow-ups after the first attempt (from a second user screenshot):
+- **Buttons stayed black-on-black/borderless.** The `QMessageBox QPushButton`
+  *descendant* selector did not take effect on the standard buttons even
+  though the box/label rules did. Fixed by styling each button object
+  directly (`for b in box.buttons(): b.setStyleSheet(...)`) with a clearly
+  visible border (`rgb(120,120,120)`) — selector-independent and reliable.
+- **Native title bar was light + rounded** (Win11). `apply_dark_titlebar()`
+  sets the DWM window attributes (immersive dark mode `20`/`19`, corner
+  preference `33` = do-not-round) via `ctypes`/`dwmapi`, best-effort and
+  Windows-only (no-op elsewhere, all failures swallowed). Called from
+  `styled_message_box` after `winId()` realises the handle but before
+  `exec_()` (dark mode must be set pre-show). **Verify live on Win11** — this
+  is the part that can't be checked headlessly.
+
+## Performance pass (2026-06-30, measurement-driven)
+
+Profiled `run_MSFaST` on the bundled example dataset (cProfile + wall timing;
+scratch scripts not committed) and benchmarked the algorithmic sections that
+scale with feature/DB size. **Every change below was verified output-identical
+against the original on real data, not just "looks equivalent"** — the bar the
+user set ("functionally identical in terms of I/O").
+
+Finding: on the small example the *pipeline* is dominated by pandas CSV
+I/O (the inter-stage `iondict.csv`/`_formatted.csv` round-trips, ~0.6s of
+to_csv + ~0.5s of read_csv out of ~2.3s), not by Python loops. That I/O chain
+is the already-logged "bigger, multi-session" refactor (threading an `iondict`
+DataFrame through `filter`/`stats`); left alone here as too invasive/risky for
+this pass. The wins below are in the per-feature/per-DB-row algorithmic code,
+which is what actually scales badly on large real datasets.
+
+- **`dbsearch.search_npatlas`: ~5x faster, output identical.** Was
+  O(features x atlas_rows): per feature it scanned all ~36k atlas rows twice
+  (once per adduct) with a full-DataFrame boolean mask, then `.copy()` +
+  `pd.concat` + `sort_values` + a scalar `.loc` write. Now pre-sorts the two
+  adduct-mass columns once and uses `np.searchsorted` to test only a tiny m/z
+  window per feature; the **exact original ppm test is re-applied to the
+  windowed candidates** so the matched set is bit-identical (the window
+  `mass*(1 ± 2·ppm/1e6)` is a proven superset of the true ppm window). Also:
+  build one DataFrame per feature from concatenated m+h/m+na positions (no
+  per-feature `pd.concat`), iterate numpy arrays instead of `iterrows`, and
+  assign the `hits` column once instead of 979 scalar `.loc` sets. Verified on
+  the real example (979 feats × 36,454 atlas rows): 1.41s → 0.28s, **0 hitdb
+  DataFrame mismatches** (incl. row order + `ppm` values) and an identical
+  `iondict['hits']` column. New edge-case tests in `test_dbsearch.py`
+  (ppm-sort across both adducts; a single atlas row matching both adducts
+  appearing twice).
+- **`qualityscore.compute_cv_quality`: ~6.5x faster, output identical.** The
+  AUC-under-the-CV-curve step was a per-feature Python loop doing
+  `iondict.iloc[pos, :]['col']` scalar lookups (the classic slow pandas
+  pattern) over thousands of rows. Replaced with the vectorised equivalent
+  `np.sum(np.diff(cv, prepend=0) * pct)`. ~0.4s → ~0.06s per call (n≈5000).
+  The faithfulness test (`test_qualityscore.py`, which pins against a verbatim
+  copy of the original loop) confirms identical values; np.sum's pairwise
+  summation can differ from the sequential loop by <1 ULP, far below the
+  0.1%-rounded display precision.
+- **`stats.groupave`: dead sum-of-squares chain removed** (pass 1) — dropped a
+  `(chunk**2).groupby().sum()` per CSV chunk that only fed an unused variance.
+- **`filter.relationalfilter`: measured, left alone.** Looks O(n²) but the
+  early `break` once past the max isotope window makes it O(n·k) with small k:
+  benchmarked at 0.017 / 0.077 / 0.371 s for 2k / 8k / 20k synthetic features
+  (near-linear). Not a bottleneck; its intricate ringing/dimer-band logic
+  isn't worth the regression risk to micro-optimize.
+- **`filter.decon` / `stats.groupave` remaining cost is the per-stage CSV
+  round-trips**, i.e. the same I/O-chain refactor noted above — not addressed
+  here.

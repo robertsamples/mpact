@@ -31,7 +31,7 @@ import urllib.request
 #: this checker can see it. Kept here as the single in-code source of truth;
 #: keep it consistent with main.py's ``label_credits`` display string
 #: (currently shows ``v1.00.01``).
-__version__ = '1.0.1'
+__version__ = '1.0.01'
 
 DEFAULT_REPO = 'robertsamples/mpact'
 _RELEASES_LATEST = 'https://api.github.com/repos/{repo}/releases/latest'

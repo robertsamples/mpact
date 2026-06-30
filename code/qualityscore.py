@@ -110,18 +110,19 @@ def compute_cv_quality(iondict, average_n):
     modelstdev = noise_model_cv(average_n)
 
     # Area under each rarefaction curve (percentage integrated over CV).
-    prevav = 0
-    aucav = 0
-    prevmed = 0
-    aucmed = 0
-    for pos in range(0, len(iondictmean.iloc[:, 0])):
-        dist = iondictmean.iloc[pos, :]['average CV'] - prevav
-        aucav += dist * iondictmean.iloc[pos, 0]
-        prevav = iondictmean.iloc[pos, :]['average CV']
+    # Vectorised equivalent of the original per-row loop
+    #   aucav += (cv[pos] - cv[pos-1]) * pct[pos]   (cv[-1] := 0)
+    # using np.diff(prepend=0) so the first step's "previous" value is 0,
+    # matching the loop's prevav/prevmed starting at 0. (np.sum's pairwise
+    # summation can differ from the loop's sequential add by <1 ULP, far below
+    # the 0.1%-rounded display precision -- the faithfulness test pins this.)
+    cv_av = iondictmean['average CV'].to_numpy()
+    pct_av = iondictmean.iloc[:, 0].to_numpy()
+    aucav = float(np.sum(np.diff(cv_av, prepend=0.0) * pct_av))
 
-        dist = iondictmed.iloc[pos, :]['median CV'] - prevmed
-        aucmed += dist * iondictmed.iloc[pos, 0]
-        prevmed = iondictmed.iloc[pos, :]['median CV']
+    cv_med = iondictmed['median CV'].to_numpy()
+    pct_med = iondictmed.iloc[:, 0].to_numpy()
+    aucmed = float(np.sum(np.diff(cv_med, prepend=0.0) * pct_med))
 
     # Integrated gap between the mean and median curves (distribution skew).
     sumskew = 0
