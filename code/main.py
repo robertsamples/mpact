@@ -44,6 +44,12 @@ from searchtree import SearchTreePanel
 from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_ordination, prev_cv, plot_upset, plot_treemap
 import getfragdb
 
+import webbrowser
+import npatlasupdate
+import mpactupdate
+import crashreport
+from dialogs import styled_message_box
+
 from indigo import Indigo
 from indigo.renderer import IndigoRenderer
 indigo = Indigo()
@@ -82,6 +88,10 @@ Check if low_memory=False increases ram usage for average grps?
 - potentially consider other database options like HMDB etc
 - fix up analysisinfo file output with better and more useful log ingo
 - add other ordination options like pca, pls-da, etc etc
+    ~DONE: the multivariate tab now offers PCA / NMDS / PLS-DA via a method
+    switcher (ordination.py, plotting.plot_ordination). Next candidate is
+    OPLS-DA (intentionally deferred -- no native sklearn support; see
+    devnotes.md "Multivariate ordination plot").
 - add custom keyword arguments for each plot to make calling them easier
 - make it so groups can be reordered in the groupsets widgets?
     ~model-layer support done: GroupSetModel.move() (groupsets.py), tested in
@@ -311,6 +321,12 @@ class MainWindow(QMainWindow):
         UIFunctions.uiDefinitions(self)
         self.show()
 
+        # Deferred (post-show) best-effort startup checks: prompt to refresh a
+        # stale NPAtlas database and to install a newer MPACT release. Run via
+        # singleShot so the window paints first; fully guarded so they can
+        # never block or break launch. GUI-only path -- verify by launching.
+        QtCore.QTimer.singleShot(0, self._run_startup_checks)
+
 
     #---Methods---
 
@@ -534,7 +550,81 @@ class MainWindow(QMainWindow):
     def error(self, message):
         self.ui.label_status.setText(message)
         self.ui.label_status.setStyleSheet('color: rgb(150,0,0);')
-    
+
+    # ---- Startup checks (atlas freshness + app self-update) ----
+    # All best-effort and fully guarded: any failure is logged to the console
+    # and otherwise ignored so a check can never block or break launch. The
+    # Qt-free logic lives in npatlasupdate.py / mpactupdate.py (unit-tested);
+    # these methods are only the dialog/wiring layer and need a live launch to
+    # verify end to end.
+    def _run_startup_checks(self):
+        try:
+            self._check_atlas_freshness()
+        except Exception as exc:
+            print('Atlas update check skipped:', exc)
+        try:
+            self._check_app_update()
+        except Exception as exc:
+            print('App update check skipped:', exc)
+
+    def _check_atlas_freshness(self, atlas_path='npatlas.tsv', max_age_days=30):
+        """Offer to re-download the Natural Products Atlas if the local copy is
+        missing or older than ``max_age_days``."""
+        if not npatlasupdate.is_update_due(atlas_path, max_age_days=max_age_days):
+            return
+        age = npatlasupdate.atlas_age_days(atlas_path)
+        age_msg = 'missing' if age is None else ('about %d days old' % int(age))
+        reply = styled_message_box(
+            self, QtWidgets.QMessageBox.Question, 'Update Natural Products Atlas?',
+            'Your local Natural Products Atlas database is %s.\n\n'
+            'Download the latest copy from npatlas.org now (about 30 MB)?' % age_msg,
+            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            default=QtWidgets.QMessageBox.No)
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        # The download is large and runs on the main thread (wait cursor); a
+        # failed/partial transfer never clobbers the existing atlas (atomic
+        # replace in npatlasupdate.download_atlas). Threading this is a future
+        # improvement -- see devnotes.md.
+        self.ui.label_status.setText('Downloading Natural Products Atlas...')
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        QtWidgets.QApplication.processEvents()
+        try:
+            n = npatlasupdate.download_atlas(atlas_path)
+            self.ui.label_status.setText('Natural Products Atlas updated (%.1f MB).' % (n / 1e6))
+        except Exception as exc:
+            self.error('Atlas update failed (kept existing copy): ' + str(exc))
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _check_app_update(self):
+        """Check GitHub for a newer MPACT release; offer a git-pull update."""
+        info = mpactupdate.check_for_update(timeout=5)
+        if not info.available:
+            return
+        notes = (info.notes or '').strip()
+        if len(notes) > 800:
+            notes = notes[:800] + '...'
+        reply = styled_message_box(
+            self, QtWidgets.QMessageBox.Question, 'MPACT update available',
+            'A newer MPACT release is available.\n\n'
+            'Installed: %s\nLatest: %s\n\n%s\n\n'
+            'Update now (git pull)?' % (info.current, info.latest, notes),
+            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            default=QtWidgets.QMessageBox.No)
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        repo_dir = Path(__file__).resolve().parent.parent
+        ok, output = mpactupdate.apply_git_update(repo_dir)
+        if ok:
+            styled_message_box(
+                self, QtWidgets.QMessageBox.Information, 'Update complete',
+                'MPACT was updated. Please restart the application.\n\n' + output)
+        else:
+            self.error('Automatic update failed; opening the release page instead.')
+            if info.url:
+                webbrowser.open(info.url)
+
     def getgroups(self):
         """
         Get biological groups on input of all input files, fills comboboxes with these.
@@ -1379,5 +1469,32 @@ if __name__ == "__main__":
     if sys.platform != 'win32':
         app.setStyle('Fusion')
     app.setStyleSheet("QFrame { border: 0px; }") #QToolTip { color: #999999; background-color: rgb(0, 255, 0); border: 1px solid grey; }")
+
+    # Crash reporting: on an unhandled exception, log a full report and offer to
+    # open a prefilled GitHub issue (nothing is sent without the user clicking
+    # through). Installed after the QApplication exists so the dialog can show.
+    # See crashreport.py for the design (and why not Sentry).
+    def _crash_dialog(report, log_path, issue_url):
+        try:
+            text = 'An unexpected error occurred.'
+            if log_path:
+                text += '\n\nA crash log was saved to:\n' + log_path
+            text += ('\n\nReport this on GitHub? Your browser will open a '
+                     'prefilled issue — nothing is sent automatically.')
+            if styled_message_box(
+                    None, QtWidgets.QMessageBox.Critical,
+                    'MPACT encountered an error', text,
+                    buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    default=QtWidgets.QMessageBox.No,
+                    detailed=report) == QtWidgets.QMessageBox.Yes and issue_url:
+                webbrowser.open(issue_url)
+        except Exception:
+            pass
+
+    crashreport.install_excepthook(
+        _crash_dialog,
+        log_dir=str(Path.home() / '.mpact' / 'crashlogs'),
+        repo=mpactupdate.DEFAULT_REPO)
+
     window = MainWindow()
     sys.exit(app.exec_())

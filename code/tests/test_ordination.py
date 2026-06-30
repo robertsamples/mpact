@@ -47,8 +47,9 @@ def test_uncollapsed_keeps_one_row_per_injection(tmp_path):
     assert len(biolgroup) == 9
 
 
-def test_collapsed_averages_technical_not_biological_replicates(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # 'averagepca.csv' lands here, not the repo
+def test_collapsed_averages_technical_not_biological_replicates(tmp_path):
+    # averagepca.csv (the collapse round-trip scratch file) is written next
+    # to the input peak table, i.e. into tmp_path here -- no chdir needed.
     path = tmp_path / 'example_filtered.csv'
     _write_synthetic_filtered_csv(path)
     x, biolgroup = load_ordination_matrix(path, _raw_header(path), collapse_replicates=True)
@@ -65,8 +66,7 @@ def test_collapsed_averages_technical_not_biological_replicates(tmp_path, monkey
     assert (biolgroup == 'groupB').sum() == 1
 
 
-def test_collapsed_values_are_the_mean_of_their_technical_replicates(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_collapsed_values_are_the_mean_of_their_technical_replicates(tmp_path):
     path = tmp_path / 'example_filtered.csv'
     _write_synthetic_filtered_csv(path)
     x, _ = load_ordination_matrix(path, _raw_header(path), collapse_replicates=True)

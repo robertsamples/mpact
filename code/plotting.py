@@ -11,6 +11,7 @@ import pickle
 from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
 import ordination
 import clusterpurity
+import qualityscore
 
 import matplotlib
 #matplotlib.style.use('ggplot')
@@ -41,7 +42,6 @@ from sklearn.preprocessing import StandardScaler
 from matplotlib.patches import Ellipse
 from filter import listfilter
 import time
-import math
 
 from pvclust import PvClust
 
@@ -1473,63 +1473,23 @@ class prev_cv(ui_plot):
         self.plot(parent, file, filtereddfs, groupsets)
 
     def plot(self, parent, file, filtereddfs, groupsets):
-        # Load and filter ion data
+        # Load ion data and the average injections-per-sample (for the noise
+        # model that scales the CV axis), then compute the quality metrics in
+        # the Qt-free qualityscore module (unit-tested; see qualityscore.py).
         iondict = cached_read_csv(parent.analysis_paramsgui.outputdir / 'iondict.csv', header=0, index_col=0)
-        iondict = iondict[~np.isnan(iondict['average CV'])]
-
-        # Calculate mean and median CV, and scale data
-        iondictmean = iondict.sort_values(['average CV']).reset_index()
-        iondictmed = iondict.sort_values(['median CV']).reset_index()
-        iondictmean = iondictmean.reset_index()
-        iondictmed = iondictmed.reset_index()
-        iondictmean.iloc[:,0] = 100 * iondictmean.iloc[:,0]/len(iondictmean['average CV'])
-        iondictmed.iloc[:,0] = 100 * iondictmed.iloc[:,0]/len(iondictmed['median CV'])
-
-        # Calculate maximum theoretical CV based on neff
         msdata_header = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=None, index_col=[0,1,2]).iloc[:3,:].transpose()
         msdata_header.columns = ['Biolgroup', 'Sample', 'Injection']
         average_n = msdata_header['Injection'].nunique() / msdata_header['Sample'].nunique()
-        modelstdevlist = [1] + [0] * (int(average_n) - 1)
-        modelstdev = pd.Series(modelstdevlist).std() / pd.Series(modelstdevlist).mean()
-        cv50 = iondictmean.iloc[(iondictmean.iloc[:,0] - 50).abs().argsort()[:1]]['average CV']
-        sortedcv = iondictmean.iloc[(iondictmean.iloc[:,0]).argsort()]['average CV']
-        prevav = 0
-        aucav = 0
-        prevmed = 0
-        aucmed = 0
-        for pos in range(0,len(iondictmean.iloc[:,0])):
-            dist = iondictmean.iloc[pos,:]['average CV'] - prevav
-            aucav += dist*iondictmean.iloc[pos,0]
-            prevav = iondictmean.iloc[pos,:]['average CV']
-            
-            dist = iondictmed.iloc[pos,:]['median CV'] - prevmed
-            aucmed += dist*iondictmed.iloc[pos,0]
-            prevmed = iondictmed.iloc[pos,:]['median CV']
-            
-        meanav = 0
-        meanmed = 0
-        sumskew = 0
-        if math.isnan(modelstdev):
-            modelstdev = 1.7
-        for val in range(1, int((modelstdev*100))):
-            pos = val/100
-            meanav = iondictmean[abs(iondictmean['average CV'] - pos-modelstdev/200) < modelstdev/200].iloc[:,0].mean()
-            meanmed = iondictmed[abs(iondictmed['average CV'] - pos-modelstdev/200) < modelstdev/200].iloc[:,0].mean()
-            skew = abs(meanmed-meanav)
-            if not np.isnan(skew):
-                sumskew += skew * modelstdev/100
 
-
-        sumskew = sumskew/ ((aucmed+aucav)/2)
-        rep = ((aucmed+aucav)/2)/(modelstdev*100)
-        qualscore = (1-sumskew)*rep*100
-        
-        #qualscore = round(100 * (1 - cv50 / modelstdev), 1)
+        result = qualityscore.compute_cv_quality(iondict, average_n)
+        iondictmean = result.iondictmean
+        iondictmed = result.iondictmed
+        modelstdev = result.modelstdev
 
         # Update UI
-        parent.ui.lbl_spllist_3.setText('Reproducibility:\n' + str(round(100*rep,1))  + '%\n' +
-                                        'Skewnewss:\n' + str(round(100*sumskew,1))  + '%\n\n' +
-                                        'Overall:\n' + str(round(qualscore,1))  + '%')
+        parent.ui.lbl_spllist_3.setText('Reproducibility:\n' + str(round(100*result.rep,1))  + '%\n' +
+                                        'Skewnewss:\n' + str(round(100*result.sumskew,1))  + '%\n\n' +
+                                        'Overall:\n' + str(round(result.qualscore,1))  + '%')
 
         # Plot data
         currplt = 'cvplt' #instead take this from input

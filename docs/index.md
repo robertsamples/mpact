@@ -6,8 +6,8 @@ table (Progenesis QI, MZmine, MS-DIAL, or Bruker Metaboscape), a sample
 list, and a metadata file, and turns them into a filtered, statistically
 annotated dataset with a full suite of interactive plots: data-quality
 review, group-level set/correlation analysis, hierarchical clustering,
-multivariate analysis (NMDS), m/z-vs-RT and mass-defect views, volcano
-plots, heatmaps, and per-feature spectral/database-match lookup.
+multivariate analysis (PCA/NMDS/PLS-DA), m/z-vs-RT and mass-defect views,
+volcano plots, heatmaps, and per-feature spectral/database-match lookup.
 
 This site covers installing and running MPACT, the file formats it
 expects, the analysis and filtering options, and what each plot/tab

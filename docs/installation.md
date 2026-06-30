@@ -15,7 +15,7 @@ scipy, NumPy) that ships with Anaconda's base environment.
 Either:
 
 - Download and unzip the repository (GitHub: **Code → Download ZIP**), or
-- Clone it (`git clone https://github.com/BalunasLab/mpact.git`, or with
+- Clone it (`git clone https://github.com/robertsamples/mpact.git`, or with
   GitHub Desktop: **Code → Open with GitHub Desktop**).
 
 It doesn't matter where you place the folder — MPACT's launcher script and

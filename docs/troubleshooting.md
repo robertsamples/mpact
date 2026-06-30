@@ -81,9 +81,11 @@ version (`plotting._is_duplicate_pick`).
 
 ## Still stuck?
 
-Check `code/tests/` — the pure-logic modules (`filter`, `stats`,
-`translators`, `groupsets`, `importdependencies`) have headless unit
-tests you can run to rule out a logic bug:
+Check `code/tests/` — the pure-logic modules (filtering, statistics,
+import/export translators, groupsets, ordination, dendrogram purity, the
+feature-search tree, and an end-to-end analysis-pipeline run on the bundled
+example dataset) have headless unit tests you can run to rule out a logic
+bug:
 
 ```
 python -m pytest code/tests -q
