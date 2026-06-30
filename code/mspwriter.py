@@ -41,10 +41,15 @@ def convert_to_msp(ionfilter_obj, analysis_params):
             f.write('Charge:\n')  # MSP file requires a formula field, but it can be left empty
             f.write('Precursor: ' + mass + '\n')  # MSP file requires a formula field, but it can be left empty
             f.write('Comment: ' + ionmerge[precursor].target + '\n')  # MSP file requires a formula field, but it can be left empty
-            numpeaks = 0
             sources = ionmerge[precursor].sources
-            for frags in sources:
-                numpeaks = len(frags)
+            # Num peaks must equal the total number of fragment lines actually
+            # written below (the nested loop emits one line per fragment across
+            # every sublist). The previous ``numpeaks = len(frags)`` overwrote
+            # rather than accumulated, so it only reported the last sublist's
+            # length; identical for the sole live caller (decon, where
+            # ``sources == [[frag, ...]]`` is a single sublist) but wrong for any
+            # multi-sublist merge. ``sum`` makes the count correct by construction.
+            numpeaks = sum(len(frags) for frags in sources)
             f.write('Num peaks: ' + str(numpeaks) + '\n')  # Number of peaks
             for frags in sources:
                 for fragment in frags:

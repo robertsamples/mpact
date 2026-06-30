@@ -65,8 +65,13 @@ def groupave(analysis_params):
     print('Averaging groups')
 
     # Calculate total number of rows and set chunk size
-    total_rows = sum(1 for _ in open(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'))) - 1
-    header = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), nrows=0, header=[0, 1, 2])
+    formatted_path = analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv')
+    # Use a context manager so the file handle is closed promptly (the bare
+    # ``sum(1 for _ in open(...))`` left the handle open until GC -- a
+    # ResourceWarning that surfaced in the test suite).
+    with open(formatted_path) as row_counter:
+        total_rows = sum(1 for _ in row_counter) - 1
+    header = pd.read_csv(formatted_path, nrows=0, header=[0, 1, 2])
     total_columns = header.shape[1]
     cells_per_chunk = 100_000
     chunk_size = max(1, cells_per_chunk // total_columns)  # Rows per chunk
