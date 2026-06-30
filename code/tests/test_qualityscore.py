@@ -23,15 +23,29 @@ EXAMPLE_DIR = REPO_ROOT / 'rawdata' / 'PTY087I2'
 
 def _reference_inline(iondict, average_n):
     """Verbatim copy of the original prev_cv.plot() computation (pre-extraction),
-    returning (rep, sumskew, qualscore). Do not 'clean up' -- it exists to pin
-    the extracted module to the exact historical behaviour."""
+    returning (rep, sumskew, qualscore). Do not 'clean up' the ALGORITHM -- it
+    exists to pin the extracted module to the exact historical behaviour.
+
+    One mechanical exception: the original assigned the rescaled percentage
+    back via ``.iloc[:, 0] = <float Series>`` directly into an int64-dtype
+    rank column. That was already a FutureWarning on the pandas pinned in
+    qualityscore.py's own fix (see there); on a newer pandas resolved by CI
+    (this repo's tests.yml installs an unpinned ``pandas`` for Python 3.11)
+    the same line raises a hard TypeError instead, which would make this
+    reference function -- not the code under test -- unable to run at all.
+    Assigning by column LABEL instead of positional .iloc (replacing the
+    column's dtype wholesale rather than casting a float into the existing
+    int64 column) is dtype-mechanics only and was already proven
+    value-identical by qualityscore.py's own equivalent fix.
+    """
     iondict = iondict[~np.isnan(iondict['average CV'])]
     iondictmean = iondict.sort_values(['average CV']).reset_index()
     iondictmed = iondict.sort_values(['median CV']).reset_index()
     iondictmean = iondictmean.reset_index()
     iondictmed = iondictmed.reset_index()
-    iondictmean.iloc[:, 0] = 100 * iondictmean.iloc[:, 0] / len(iondictmean['average CV'])
-    iondictmed.iloc[:, 0] = 100 * iondictmed.iloc[:, 0] / len(iondictmed['median CV'])
+    mean_col0, med_col0 = iondictmean.columns[0], iondictmed.columns[0]
+    iondictmean[mean_col0] = 100 * iondictmean.iloc[:, 0] / len(iondictmean['average CV'])
+    iondictmed[med_col0] = 100 * iondictmed.iloc[:, 0] / len(iondictmed['median CV'])
     modelstdevlist = [1] + [0] * (int(average_n) - 1)
     modelstdev = pd.Series(modelstdevlist).std() / pd.Series(modelstdevlist).mean()
     prevav = 0

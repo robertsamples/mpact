@@ -1022,3 +1022,45 @@ which is what actually scales badly on large real datasets.
 - **`filter.decon` / `stats.groupave` remaining cost is the per-stage CSV
   round-trips**, i.e. the same I/O-chain refactor noted above — not addressed
   here.
+
+## CI matrix failures fixed (2026-07-01)
+
+`.github/workflows/tests.yml` runs a 3 OS x 2 Python-version matrix
+(ubuntu/windows/macos x 3.9/3.11) with an **unpinned** `pandas` install (only
+`numpy<2` is pinned) — so different runners can resolve genuinely different
+pandas versions, and a test can pass on one cell and fail on another for
+reasons that have nothing to do with the OS or Python version per se.
+
+- **`test_qualityscore.py`: 4 failures on Python 3.11 cells (pandas resolved
+  to 3.0.x there), 0 on 3.9 (older pandas).** `_reference_inline()`'s
+  deliberately-preserved verbatim copy of the *original* pre-extraction code
+  used `.iloc[:, 0] = <float Series>` to overwrite an int64-dtype column —
+  exactly the pattern `qualityscore.py` itself was already fixed to avoid (see
+  "Performance pass" above). On pandas 2.x this was only a `FutureWarning`;
+  **on pandas 3.x it's a hard `TypeError`**, confirmed by reproducing both the
+  old and new patterns against a real pandas 3.0.3 install in an isolated
+  venv. Since the *algorithm* under test wasn't the issue (only a dtype-
+  mechanics detail of the reference copy, which would have made the original
+  app code itself crash on a fresh pandas 3.x install, not just this test),
+  fixed `_reference_inline()` to use the same label-based assignment
+  (`df[col] = ...`) as the production fix. Re-verified output-identical and
+  passing under pandas 3.0.3 (all 222 tests), not just inspected.
+- **`test_dialogs.py::test_build_message_box_applies_style_and_content`: failed
+  on every macOS cell (both 3.9 and 3.11), passed on Windows/Ubuntu.**
+  `box.windowTitle()` reads back `''` after `setWindowTitle('Title here')` on
+  macOS specifically — Qt's Cocoa integration renders `QMessageBox` as a
+  native alert panel (no title bar, per Apple HIG) and doesn't retain the
+  `windowTitle` property for that widget type there, independent of any
+  styling. Not a `dialogs.py` defect: `build_message_box` still calls
+  `setWindowTitle` unconditionally (meaningful everywhere else, harmless on
+  macOS); the test's readback assertion is now gated on
+  `sys.platform != 'darwin'`.
+- **Watch item, not fixed (no failing test, no coverage to verify a fix
+  against): `mzmineimport.py` has several `.iloc[:, N] = .iloc[:, M]`-style
+  column reassignments** (lines ~70-71, ~190-202) reading `header=None` CSVs.
+  These are column-to-column copies within the same frame (not a computed-
+  float into a known-int column like the bug above), so lower risk, but
+  unpinned `pandas` in CI means a future resolve could expose the same class
+  of issue here too. No dedicated test file exists for `mzmineimport.py`
+  (format detection is covered via `translators.py`/`test_translators.py`
+  instead) — add coverage before touching this blind.

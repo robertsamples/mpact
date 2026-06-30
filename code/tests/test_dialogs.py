@@ -6,6 +6,8 @@ Guards the regression that prompted this module: a QMessageBox with no
 explicit colours rendered black-on-black under the app's dark styling.
 """
 
+import sys
+
 from PyQt5 import QtWidgets
 
 import dialogs
@@ -25,7 +27,16 @@ def test_build_message_box_applies_style_and_content(qapp):
         default=QtWidgets.QMessageBox.No)
     assert isinstance(box, QtWidgets.QMessageBox)
     assert box.text() == 'Body text'
-    assert box.windowTitle() == 'Title here'
+    if sys.platform != 'darwin':
+        # Qt's Cocoa (macOS) integration treats QMessageBox as a native
+        # alert panel -- per Apple HIG, alerts have no title bar -- and
+        # doesn't retain the windowTitle property for it specifically (other
+        # widget types aren't affected). build_message_box still calls
+        # setWindowTitle unconditionally since it's meaningful on every other
+        # platform (and harmless here); only the readback assertion is
+        # platform-gated. Reproduced on stock PyQt5 with no styling applied
+        # at all, so this is not something dialogs.py's theming can fix.
+        assert box.windowTitle() == 'Title here'
     # The dark theme is actually applied to this box.
     assert 'rgb(212,212,212)' in box.styleSheet()
     assert box.standardButtons() == (QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
