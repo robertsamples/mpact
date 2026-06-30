@@ -4,31 +4,23 @@ Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 """
 
 ## ==> GUI FILE
-from main import MainWindow, start_functime, stop_functime, reset_runtime, ftrdialog, dialog
-#import masstdriver #from old version of masst search push
-import webbrowser #may not be needed now
+from main import MainWindow, start_functime, stop_functime, reset_runtime
+import webbrowser  # used by masst() to open the GNPS single-spectrum search
 from mzmineimport import format_check
 from paramfields import restore_checkbox_fields
 
-import sys
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
-import time
 
-import platform
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QMainWindow, QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
-from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
-from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
+from PyQt5 import QtCore
+from PyQt5.QtWidgets import QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
+from PyQt5.QtGui import QColor
 from pathlib import Path
 
 
-# IMPORT FUNCTIONS AND RESOURCES
+# Imported for its side effect only (registers the Qt resource blobs used by
+# the stylesheets/icons); do not remove even though it looks unused.
 import files
-
-from MSFaST import analysis_parameters
-
-import os
 
 
 
@@ -36,6 +28,48 @@ import os
 ## ==> GLOBALS
 
 GLOBAL_STATE = 0
+
+# Tab-switch tables. Each nav button maps to the stacked-widget page(s) it
+# selects (plus, for plot tabs, any dialog-frame show/hide deltas to apply
+# after the bar reset). goto_maintab()/goto_plottab() are the single
+# data-driven dispatchers that replace the ~15 near-identical goto_* methods;
+# the buttons are wired to them by key in uiDefinitions(). Module-level (not
+# self/class attributes) because the dispatchers run with a MainWindow `self`,
+# not a UIFunctions instance.
+#
+# _MAINBAR_TABS:  key -> (stackedWidget index, active-button attr on self.ui)
+_MAINBAR_TABS = {
+    'import': (0, 'btn_import'),
+    'filter': (1, 'btn_filter'),
+    'params': (2, 'btn_parameters'),
+    'plot':   (3, 'btn_plots'),
+    'info':   (4, 'btn_info'),
+    'search': (5, 'btn_search'),
+}
+# _PLOTBAR_TABS: key -> (infobar index, plot index, active-button attr,
+#                        [(action, dialog.ui widget attr), ...] applied after reset)
+_PLOTBAR_TABS = {
+    'review':  (0, 1, 'btn_review',  []),
+    'upset':   (1, 9, 'btn_upset',   [('show', 'frame_colorscheme')]),
+    'dend':    (1, 2, 'btn_dend',    []),
+    'pca':     (1, 3, 'btn_pca',     [('show', 'frame_2')]),
+    'mzrt':    (0, 4, 'btn_mzrt',    []),
+    'kmd':     (0, 5, 'btn_kmd',     [('show', 'frame_mdguide')]),
+    '3dfc':    (0, 6, 'btn_3dfc',    []),
+    'volcano': (0, 7, 'btn_volcano', [('show', 'frame_volcanoparams')]),
+    'heatmap': (0, 8, 'btn_heatmap', [('show', 'frame_colorscheme')]),
+}
+
+# Nav-button stylesheets. Defined once here instead of being rebuilt on
+# every reset_*bar() call (and read back off self.ui, where they were
+# only ever used internally). The plot tab bar and the feature-info dialog
+# bar shared a visually identical light style (the two former copies
+# differed only by insignificant CSS whitespace), so they now share one
+# pair. The left main-nav bar has its own (dark/transparent) theme.
+_MAINBAR_ACTIVE_STYLE = 'QPushButton {\tborder: none; background-color: transparent;}QPushButton:hover {background-color: transparent}QPushButton:pressed {\tbackground-color: rgb(75, 75, 75);}'
+_MAINBAR_INACTIVE_STYLE = 'QPushButton {\tborder: none; background-color: rgb(35, 35, 35);}QPushButton:hover {background-color: transparent}QPushButton:pressed {\tbackground-color: rgb(75, 75, 75);}'
+_LIGHT_ACTIVE_STYLE = 'QPushButton {\tborder: none;background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)} QPushButton:hover {background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)} QPushButton:pressed {\t background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)}'
+_LIGHT_INACTIVE_STYLE = 'QPushButton {\tborder: none;background-color: rgba(0,0,0, 0)} QPushButton:hover {background-color: rgba(225,225,225, 50)} QPushButton:pressed {\t background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)}'
 
 class UIFunctions(MainWindow):
 
@@ -83,6 +117,12 @@ class UIFunctions(MainWindow):
         self.ui.frame_plts.hide()
         self.ui.checkBox_fc.hide()
         self.ui.checkBox_ttest.hide()
+        # The per-feature-set "Use" checkbox (and its label) next to the colour
+        # picker is inert -- nothing in the hand-written code ever connects or
+        # reads checkBox_use1, so it does nothing. Hide both at runtime rather
+        # than editing the generated ui_main.py.
+        self.ui.checkBox_use1.hide()
+        self.ui.lbl_use.hide()
         # "Bootstrap Analysis" and "Collapse Technical Replicates" moved
         # from this global plot-config dialog onto their one relevant
         # plot's own switcher bar (plot_dendrogram's "Bootstrap" checkbox,
@@ -91,6 +131,11 @@ class UIFunctions(MainWindow):
         # ui_plotparam.py.
         self.dialog.ui.frame_bootstrap.hide()
         self.dialog.ui.frame_2.hide()
+        # "Apply Data Filtering" is inert (its checked state is never read and
+        # it has no signal connection), so hide it permanently rather than
+        # leaving a no-op control on the config dialog. Hidden once here; the
+        # per-tab show() that used to reveal it in reset_plotbar() is removed.
+        self.dialog.ui.checkBox_applyfilter.hide()
 
         # Top bar functions
         self.ui.btn_maximize.clicked.connect(lambda: UIFunctions.maximize_restore(self))
@@ -99,24 +144,20 @@ class UIFunctions(MainWindow):
 
         #mainbar functions
         self.ui.stackedWidget.setCurrentIndex(6)
-        self.ui.btn_import.clicked.connect(lambda: UIFunctions.goto_import(self))
-        self.ui.btn_filter.clicked.connect(lambda: UIFunctions.goto_filter(self))
-        self.ui.btn_parameters.clicked.connect(lambda: UIFunctions.goto_params(self))
-        self.ui.btn_plots.clicked.connect(lambda: UIFunctions.goto_plot(self))
-        self.ui.btn_info.clicked.connect(lambda: UIFunctions.goto_info(self))
+        # Simple tab buttons go through the table-driven dispatcher (keyed by
+        # _MAINBAR_TABS); 'search' additionally kicks off the db search, so it
+        # keeps its own handler. (*_a absorbs the clicked(bool) arg; k=key binds
+        # per-iteration so the closure doesn't capture the final loop value.)
+        for key in ('import', 'filter', 'params', 'plot', 'info'):
+            getattr(self.ui, _MAINBAR_TABS[key][1]).clicked.connect(
+                lambda *_a, k=key: UIFunctions.goto_maintab(self, k))
         self.ui.btn_search.clicked.connect(lambda: UIFunctions.goto_search(self))
 
         #plotbar functions
         self.ui.stackedWidget_plot.setCurrentIndex(0)
-        self.ui.btn_review.clicked.connect(lambda: UIFunctions.goto_review(self))
-        self.ui.btn_upset.clicked.connect(lambda: UIFunctions.goto_upset(self))
-        self.ui.btn_dend.clicked.connect(lambda: UIFunctions.goto_dend(self))
-        self.ui.btn_pca.clicked.connect(lambda: UIFunctions.goto_pca(self))
-        self.ui.btn_mzrt.clicked.connect(lambda: UIFunctions.goto_mzrt(self))
-        self.ui.btn_kmd.clicked.connect(lambda: UIFunctions.goto_kmd(self))
-        self.ui.btn_3dfc.clicked.connect(lambda: UIFunctions.goto_3dfc(self))
-        self.ui.btn_volcano.clicked.connect(lambda: UIFunctions.goto_volcano(self))
-        self.ui.btn_heatmap.clicked.connect(lambda: UIFunctions.goto_heatmap(self))
+        for key in _PLOTBAR_TABS:
+            getattr(self.ui, _PLOTBAR_TABS[key][2]).clicked.connect(
+                lambda *_a, k=key: UIFunctions.goto_plottab(self, k))
         
         self.ui.stackedWidget_review.setCurrentIndex(3)
         self.ui.btn_ftrplt.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(0))
@@ -181,35 +222,19 @@ class UIFunctions(MainWindow):
 
 
     #ui buttons
-    def goto_import(self):
-        self.ui.stackedWidget.setCurrentIndex(0)
+    def goto_maintab(self, key):
+        """Switch the main left-nav stacked widget to the page for ``key`` and
+        highlight its button. Data-driven via ``_MAINBAR_TABS``; replaces the
+        former one-method-per-tab goto_import/filter/params/plot/info."""
+        index, button_attr = _MAINBAR_TABS[key]
+        self.ui.stackedWidget.setCurrentIndex(index)
         UIFunctions.reset_mainbar(self)
-        self.ui.btn_import.setStyleSheet(self.ui.mainbar_activebtn)
-        
-    def goto_filter(self):
-        self.ui.stackedWidget.setCurrentIndex(1)
-        UIFunctions.reset_mainbar(self)
-        self.ui.btn_filter.setStyleSheet(self.ui.mainbar_activebtn)       
-        
-    def goto_params(self):
-        self.ui.stackedWidget.setCurrentIndex(2)
-        UIFunctions.reset_mainbar(self)
-        self.ui.btn_parameters.setStyleSheet(self.ui.mainbar_activebtn)
+        getattr(self.ui, button_attr).setStyleSheet(_MAINBAR_ACTIVE_STYLE)
 
-    def goto_plot(self):
-        self.ui.stackedWidget.setCurrentIndex(3)
-        UIFunctions.reset_mainbar(self)
-        self.ui.btn_plots.setStyleSheet(self.ui.mainbar_activebtn)
-
-    def goto_info(self):
-        self.ui.stackedWidget.setCurrentIndex(4)
-        UIFunctions.reset_mainbar(self)
-        self.ui.btn_info.setStyleSheet(self.ui.mainbar_activebtn)
-        
     def goto_search(self):
-        self.ui.stackedWidget.setCurrentIndex(5)
-        UIFunctions.reset_mainbar(self)
-        self.ui.btn_search.setStyleSheet(self.ui.mainbar_activebtn)
+        """Main-nav 'Search' tab: switch like any other main tab, then run the
+        one-time NPAtlas db search + feature-tree fill once an analysis exists."""
+        UIFunctions.goto_maintab(self, 'search')
         #self.ftrdialog.show()
         if self.dbsearchdone == False and self.analysisrun:
             start_functime()
@@ -220,15 +245,6 @@ class UIFunctions(MainWindow):
             reset_runtime()
         elif not self.analysisrun:
             self.error('Run an analysis before searching.')
-            
-    #plotbar functions
-    def goto_review(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(0)
-        self.ui.stackedWidget_plot.setCurrentIndex(1)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_review.setStyleSheet(self.ui.plotbar_activebtn)
-        
-        self.dialog.ui.checkBox_applyfilter.hide()
 
     def switch_grpanalysis_tab(self, idx):
         """Switch the Group Analysis sub-tab (UpSet Plot=0, Sample
@@ -239,65 +255,23 @@ class UIFunctions(MainWindow):
         if getattr(self, 'samplecorr', None) is not None:
             self.samplecorr.set_controls_enabled(idx == 1)
 
-    def goto_upset(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(1)
-        self.ui.stackedWidget_plot.setCurrentIndex(9)
+    #plotbar functions
+    def goto_plottab(self, key):
+        """Switch the plots area (infobar + plot stacked widgets) to the page
+        for ``key``, highlight its button, and apply that tab's dialog-frame
+        show/hide deltas. Data-driven via ``_PLOTBAR_TABS``; replaces the former
+        one-method-per-tab goto_review/upset/dend/pca/mzrt/kmd/3dfc/volcano/
+        heatmap. Order matches the originals: set pages -> reset bar (which
+        hides every per-tab frame) -> mark the active button -> apply this
+        tab's frame deltas on top."""
+        infobar_index, plot_index, button_attr, frame_ops = _PLOTBAR_TABS[key]
+        self.ui.stackedWidget_infobar.setCurrentIndex(infobar_index)
+        self.ui.stackedWidget_plot.setCurrentIndex(plot_index)
         UIFunctions.reset_plotbar(self)
-        self.ui.btn_upset.setStyleSheet(self.ui.plotbar_activebtn)
-        
-        self.dialog.ui.checkBox_applyfilter.hide()
-        self.dialog.ui.frame_colorscheme.show()
-        
-    def goto_dend(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(1)
-        self.ui.stackedWidget_plot.setCurrentIndex(2)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_dend.setStyleSheet(self.ui.plotbar_activebtn)
-        
-    def goto_pca(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(1)
-        self.ui.stackedWidget_plot.setCurrentIndex(3)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_pca.setStyleSheet(self.ui.plotbar_activebtn)
-        
-        self.dialog.ui.frame_2.show()
+        getattr(self.ui, button_attr).setStyleSheet(_LIGHT_ACTIVE_STYLE)
+        for action, widget_attr in frame_ops:
+            getattr(getattr(self.dialog.ui, widget_attr), action)()
 
-    def goto_mzrt(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(0)
-        self.ui.stackedWidget_plot.setCurrentIndex(4)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_mzrt.setStyleSheet(self.ui.plotbar_activebtn)
-        
-    def goto_kmd(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(0)
-        self.ui.stackedWidget_plot.setCurrentIndex(5)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_kmd.setStyleSheet(self.ui.plotbar_activebtn)
-        
-        self.dialog.ui.frame_mdguide.show()
-        
-    def goto_3dfc(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(0)
-        self.ui.stackedWidget_plot.setCurrentIndex(6)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_3dfc.setStyleSheet(self.ui.plotbar_activebtn)
-        
-    def goto_volcano(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(0)
-        self.ui.stackedWidget_plot.setCurrentIndex(7)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_volcano.setStyleSheet(self.ui.plotbar_activebtn)
-        
-        self.dialog.ui.frame_volcanoparams.show()
-
-    def goto_heatmap(self):
-        self.ui.stackedWidget_infobar.setCurrentIndex(0)
-        self.ui.stackedWidget_plot.setCurrentIndex(8)
-        UIFunctions.reset_plotbar(self)
-        self.ui.btn_heatmap.setStyleSheet(self.ui.plotbar_activebtn)
-
-        self.dialog.ui.frame_colorscheme.show()
-        
     #ftinfobar functions
     def goto_abund(self):
         self.ftrdialog.ui.btn_masst.hide()
@@ -306,7 +280,7 @@ class UIFunctions(MainWindow):
         # that the abundance tab is active.
         self._refresh_highlight()
         UIFunctions.reset_ftrdialogbar(self)
-        self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_activebtn)
+        self.ftrdialog.ui.btn_abund.setStyleSheet(_LIGHT_ACTIVE_STYLE)
 
     def goto_hits(self):
         self.ftrdialog.ui.btn_masst.hide()
@@ -314,13 +288,13 @@ class UIFunctions(MainWindow):
 
         self._refresh_highlight()
         UIFunctions.reset_ftrdialogbar(self)
-        self.ftrdialog.ui.btn_hits.setStyleSheet(self.ui.ftbar_activebtn)
+        self.ftrdialog.ui.btn_hits.setStyleSheet(_LIGHT_ACTIVE_STYLE)
         
     def goto_spectrum(self):
         self.ftrdialog.ui.btn_masst.show()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(1)
         UIFunctions.reset_ftrdialogbar(self)
-        self.ftrdialog.ui.btn_spectrum.setStyleSheet(self.ui.ftbar_activebtn)
+        self.ftrdialog.ui.btn_spectrum.setStyleSheet(_LIGHT_ACTIVE_STYLE)
 
     def masst(self): 
         """
@@ -393,7 +367,9 @@ class UIFunctions(MainWindow):
         Syncs the three group-membership lists (and colour swatch) in the GUI
         to the currently-selected groupset in the model.
         """
-        selgroup = self.groupsetmodel.select(self.ui.listWidget_pltgrps.currentRow())
+        # select() also sets the model's selected_index (side effect we rely on);
+        # its return value is unused here.
+        self.groupsetmodel.select(self.ui.listWidget_pltgrps.currentRow())
 
         self.ui.listWidget_allgrps.clear()
         self.ui.listWidget_orgrps.clear()
@@ -598,17 +574,19 @@ class UIFunctions(MainWindow):
                 self.getgroups() 
                 
     def getoutputdir(self):
-            self.outputdir = Path(str(QFileDialog.getExistingDirectory(self, 'Select Directory', self.recentdir)))
+            selected = QFileDialog.getExistingDirectory(self, 'Select Directory', self.recentdir)
+            if not selected:
+                # Dialog cancelled -- leave the previously-selected output dir
+                # (and recentdir) untouched rather than clobbering them.
+                self.error('No directory selected')
+                return
+            self.outputdir = Path(selected)
             self.recentdir = str(self.outputdir)
-            if len(str(self.outputdir)) <40:
-                try:
-                    self.ui.lbl_outdir.setText(self.outputdir)
-                except Exception:
-                    self.error('No directory selected')
-                    pass
-                    return()
-            else:
-                self.ui.lbl_outdir.setText('...' + str(self.outputdir)[-40:])
+            # setText needs a str (passing a Path raises); show the full path
+            # when short, otherwise truncate from the left so the informative
+            # tail stays visible.
+            shown = str(self.outputdir)
+            self.ui.lbl_outdir.setText(shown if len(shown) < 40 else '...' + shown[-40:])
 
     def getfragfilename(self):
             self.fragfilename, _ = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir,
@@ -627,44 +605,37 @@ class UIFunctions(MainWindow):
 
     #reset uibar buttons
     def reset_mainbar(self):
-        self.ui.mainbar_activebtn = "QPushButton {	border: none; background-color: transparent;}QPushButton:hover {background-color: transparent}QPushButton:pressed {	background-color: rgb(75, 75, 75);}"
-        self.ui.mainbar_inactivebtn ="QPushButton {	border: none; background-color: rgb(35, 35, 35);}QPushButton:hover {background-color: transparent}QPushButton:pressed {	background-color: rgb(75, 75, 75);}"
-        self.ui.btn_import.setStyleSheet(self.ui.mainbar_inactivebtn)
-        self.ui.btn_filter.setStyleSheet(self.ui.mainbar_inactivebtn)
-        self.ui.btn_parameters.setStyleSheet(self.ui.mainbar_inactivebtn)
-        self.ui.btn_plots.setStyleSheet(self.ui.mainbar_inactivebtn)
-        self.ui.btn_info.setStyleSheet(self.ui.mainbar_inactivebtn)
-        self.ui.btn_search.setStyleSheet(self.ui.mainbar_inactivebtn)
+        self.ui.btn_import.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
+        self.ui.btn_filter.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
+        self.ui.btn_parameters.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
+        self.ui.btn_plots.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
+        self.ui.btn_info.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
+        self.ui.btn_search.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
         self.ui.label_status.setText('') #to reset analysis status after tabs are switched. eventually use a second thread to dynamically update status
         self.ui.label_status.setStyleSheet('color: rgb(150,150,150);')
         
     def reset_plotbar(self):
-        self.ui.plotbar_activebtn = "QPushButton {	border: none;background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:hover {background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
-        self.ui.plotbar_inactivebtn ="QPushButton {	border: none;background-color: rgba(0,0,0, 0)} QPushButton:hover {background-color: rgba(225,225,225, 50)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
-        self.ui.btn_review.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_dend.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_upset.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_pca.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_mzrt.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_kmd.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_3dfc.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_volcano.setStyleSheet(self.ui.plotbar_inactivebtn)
-        self.ui.btn_heatmap.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_review.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_dend.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_upset.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_pca.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_mzrt.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_kmd.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_3dfc.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_volcano.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.btn_heatmap.setStyleSheet(_LIGHT_INACTIVE_STYLE)
         
         self.dialog.ui.frame_2.hide()
         self.dialog.ui.frame.hide() #hide apply button, button doesnt work right now, use run button
         self.dialog.ui.frame_mdguide.hide()
         self.dialog.ui.frame_volcanoparams.hide()
         self.dialog.ui.frame_colorscheme.hide()
-        self.dialog.ui.checkBox_applyfilter.show()
         self.ui.label_status.setText('')
 
     def reset_ftrdialogbar(self):
-        self.ui.ftbar_activebtn = "QPushButton {border: none;background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:hover {background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
-        self.ui.ftbar_inactivebtn ="QPushButton {border: none;background-color: rgba(0,0,0,0)} QPushButton:hover {background-color: rgba(225,225,225, 50)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
-        self.ftrdialog.ui.btn_hits.setStyleSheet(self.ui.ftbar_inactivebtn)
-        self.ftrdialog.ui.btn_spectrum.setStyleSheet(self.ui.ftbar_inactivebtn)
-        self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_inactivebtn)
+        self.ftrdialog.ui.btn_hits.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ftrdialog.ui.btn_spectrum.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ftrdialog.ui.btn_abund.setStyleSheet(_LIGHT_INACTIVE_STYLE)
     
     def show_ftrdialog(self):
         self.ftrdialog.show()
