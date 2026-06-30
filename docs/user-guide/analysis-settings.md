@@ -59,6 +59,6 @@ presence/absence in these groups, as indicated by Venn diagrams.*
     Internally, each Plot Feature Set is a `GroupSet` object managed by a
     small model/collection class (`GroupSetModel`) rather than a bare list
     + selected-index pair. This is purely an implementation detail (see
-    [Development](../development.md)) — old `.mpct` save files still load
-    correctly, with their saved feature sets converted into the current
-    representation automatically.
+    [`devnotes.md`](https://github.com/robertsamples/mpact/blob/main/devnotes.md))
+    — old `.mpct` save files still load correctly, with their saved feature
+    sets converted into the current representation automatically.

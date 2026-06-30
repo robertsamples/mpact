@@ -12,14 +12,51 @@ combination of groups (top bar chart + dot matrix).
 ![UpSet plot](../images/upset-plot.png)
 *MPACT UpSet plot showing the distribution of features across sample sets.*
 
-## Spearman Correlation Matrix
+## Sample Correlation Matrix
 
-Pairwise Spearman correlation between every group, useful for evaluating
-overall metabolomic similarity at a glance. Colour scheme is configurable
-in the plot options dialog.
+Pairwise similarity between samples/groups, useful for evaluating overall
+metabolomic similarity at a glance. Colour scheme is configurable in the
+plot options dialog.
 
-![Spearman correlation matrix](../images/spearman-matrix.png)
-*MPACT Spearman correlation matrix.*
+A settings bar shared with the UpSet Plot tab (the same bar holding the
+"Sets"/"Sample Correlations" buttons) controls how it's drawn, and redraws
+immediately on any change. These controls are greyed out while the UpSet
+Plot tab is active, since they don't apply there.
+
+**Method** — which similarity measure to compute:
+
+- **Spearman** (default): rank correlation of abundance profiles, robust
+  to the non-normal, heavy-tailed abundance distributions typical of
+  LC-MS data. Mathematically ranges -1 to 1, but the heatmap scale is fixed
+  to 0-1 since real sample correlations cluster tightly positive in
+  practice — a -1-to-1 scale would compress that variation into an
+  unreadable sliver of the colour range.
+- **Jaccard**: presence/absence similarity — based only on which features
+  are detected in each sample/group, ignoring how much. Useful when
+  detection (not relative abundance) is what you care about. Ranges 0 to 1.
+- **Bray-Curtis**: abundance-weighted similarity, the standard measure in
+  ecology/metabolomics (same convention as the Multivariate Analysis tab's
+  NMDS). Ranges 0 to 1.
+
+**View** — which rows/columns to correlate:
+
+- **Biological Replicates** (default): technical replicates are averaged
+  together first (one row/column per sample), so the matrix reflects
+  biological/treatment-group similarity without technical noise.
+- **Individual Injections**: no averaging — every injection is its own
+  row/column.
+- **Biological Groups**: both technical and biological replicates are
+  averaged together — one row/column per treatment group, for "see only
+  biological groups" at a glance.
+
+**Use Sample/Group Names** — same nomenclature as the dendrogram's: when
+checked, labels switch from the raw injection/file names to
+`<group>_b<#>_s<#>` (Individual Injections view), `<group>_b<#>`
+(Biological Replicates view), or the bare group name (Biological Groups
+view, nothing left to shorten).
+
+![Sample correlation matrix](../images/spearman-matrix.png)
+*MPACT sample correlation matrix.*
 
 ## Dendrogram
 
@@ -49,16 +86,18 @@ immediately when changed:
 - **Purity** (default): a branch is colored **green** if every leaf beneath
   it belongs to the same sample (Technical Replicates view) or the same
   treatment group (Biological Replicates view) — i.e. it's correctly,
-  unambiguously clustered. A branch is colored **red** if it's the specific
-  point where two different samples/groups' leaves are proven to overlap
-  (some of that sample's/group's replicates are on each side of the
+  unambiguously clustered. A branch is colored **magenta** if it's the
+  specific point where two different samples/groups' leaves are proven to
+  overlap (some of that sample's/group's replicates are on each side of the
   split) — a real sign of poor clustering, not just "still mixed from
-  somewhere lower in the tree." Every other branch (a clean join of two
-  unrelated, already-resolved regions) stays black, even if it sits above a
-  red branch elsewhere in the tree — so a single tangled sample doesn't
-  paint the whole tree red. The plot title reports how many
-  samples/groups are *fully* correctly clustered (e.g. "7/9 samples'
-  replicates clustered together").
+  somewhere lower in the tree." (Magenta rather than the more conventional
+  red, since red-green colorblindness — the most common form — can't tell
+  red and green apart; magenta stays distinguishable from green.) Every
+  other branch (a clean join of two unrelated, already-resolved regions)
+  stays black, even if it sits above a magenta branch elsewhere in the tree
+  — so a single tangled sample doesn't paint the whole tree magenta. The
+  plot title reports how many samples/groups are *fully* correctly
+  clustered (e.g. "7/9 samples' replicates clustered together").
 - **None**: a plain, uncolored dendrogram with no title — useful if you
   just want the clustering shape without the QC overlay.
 

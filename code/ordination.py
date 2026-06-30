@@ -241,6 +241,39 @@ def nmds_loading_proxy(x, scores):
     )
 
 
+def similarity_matrix(x, method):
+    """Pairwise similarity between samples (rows of ``x``, a samples x
+    features intensity matrix) -- backs the sample-correlation heatmap's
+    "Method" switcher.
+
+    - ``'Spearman'``: rank correlation of abundance profiles. The
+      established default for metabolomics QC (robust to the non-normal,
+      heavy-tailed abundance distributions typical of LC-MS data); values
+      in [-1, 1].
+    - ``'Jaccard'``: 1 - Jaccard distance on which features are detected
+      (abundance > 0) in each sample, ignoring relative abundance
+      entirely -- useful when what matters is which compounds were
+      detected at all rather than how much; values in [0, 1].
+    - ``'Bray-Curtis'``: 1 - Bray-Curtis dissimilarity, the standard
+      abundance-weighted similarity measure in ecology/metabolomics,
+      computed on raw abundances (same convention as ``run_nmds``'s
+      dissimilarity, unlike PCA/PLS-DA's autoscaled features); values in
+      [0, 1].
+
+    Returns a samples x samples DataFrame.
+    """
+    if method == 'Spearman':
+        return x.transpose().corr(method='spearman')
+    x_filled = x.fillna(0)
+    if method == 'Jaccard':
+        dist = pairwise_distances((x_filled > 0).values, metric='jaccard')
+    elif method == 'Bray-Curtis':
+        dist = pairwise_distances(x_filled.values, metric='braycurtis')
+    else:
+        raise ValueError(f'Unknown similarity method: {method!r}')
+    return pd.DataFrame(1 - dist, index=x.index, columns=x.index)
+
+
 def run_plsda(x, y, n_components):
     """PLS-DA: PLS regression of the samples x features matrix against
     one-hot-encoded group labels.

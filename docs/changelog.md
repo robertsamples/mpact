@@ -22,8 +22,10 @@
     Replicates), **Color** (Purity / None), **Bootstrap**, and
     **Use Sample/Group Names**.
   - Purity coloring: green branches are cleanly within-sample/group;
-    red branches mark the exact merge point where two groups' leaves
-    overlap (proven non-monophyly). A title reports how many
+    magenta branches mark the exact merge point where two groups' leaves
+    overlap (proven non-monophyly) — magenta rather than the more
+    conventional red, since red-green colorblindness (the most common
+    form) can't distinguish red from green. A title reports how many
     samples/groups are fully correctly clustered.
   - "Use Sample/Group Names" checkbox: replaces raw injection/file names
     with `<group>_b<#>_s<#>` (Technical Replicates view) or
@@ -32,6 +34,12 @@
   - Fixed AU/BP annotation alignment: labels now stay a constant pixel
     gap apart regardless of leaf count, with leaf-count-scaled font size.
   - `fastcluster` optional acceleration for bootstrap linkage.
+- Sample Correlation Matrix rework: a **Method** switcher (Spearman /
+  Jaccard / Bray-Curtis), a **View** switcher (Individual Injections /
+  Biological Replicates / Biological Groups), and a "Use Sample/Group
+  Names" checkbox, all in the nav bar shared with the UpSet Plot tab
+  (greyed out while that tab is active). The heatmap scale is fixed to
+  0-1 for all three methods.
 - UpSet and treemap plots are now rendered directly on a Qt canvas
   (replacing a PNG round-trip).
 - Headless unit test suite (`code/tests/`).

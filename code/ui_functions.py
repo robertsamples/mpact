@@ -124,8 +124,8 @@ class UIFunctions(MainWindow):
         self.ui.btn_cvplt.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(2))
         self.ui.btn_datasummary.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(3))
         
-        self.ui.btn_upsetplt.clicked.connect(lambda: self.ui.stackedWidget_grpanalysis.setCurrentIndex(0))
-        self.ui.btn_samplecorr.clicked.connect(lambda: self.ui.stackedWidget_grpanalysis.setCurrentIndex(1))
+        self.ui.btn_upsetplt.clicked.connect(lambda: UIFunctions.switch_grpanalysis_tab(self, 0))
+        self.ui.btn_samplecorr.clicked.connect(lambda: UIFunctions.switch_grpanalysis_tab(self, 1))
 
         #feature info bar functions
         self.ftrdialog.ui.btn_close.clicked.connect(lambda: self.ftrdialog.hide())  
@@ -229,6 +229,15 @@ class UIFunctions(MainWindow):
         self.ui.btn_review.setStyleSheet(self.ui.plotbar_activebtn)
         
         self.dialog.ui.checkBox_applyfilter.hide()
+
+    def switch_grpanalysis_tab(self, idx):
+        """Switch the Group Analysis sub-tab (UpSet Plot=0, Sample
+        Correlations=1) and grey out plot_samplecorr's Method/View/Use-Names
+        controls -- shared with btn_upsetplt/btn_samplecorr in frame_12 --
+        whenever the UpSet Plot tab is active, since they don't apply there."""
+        self.ui.stackedWidget_grpanalysis.setCurrentIndex(idx)
+        if getattr(self, 'samplecorr', None) is not None:
+            self.samplecorr.set_controls_enabled(idx == 1)
 
     def goto_upset(self):
         self.ui.stackedWidget_infobar.setCurrentIndex(1)

@@ -10,17 +10,22 @@ to make it visually obvious whether technical replicates of one Sample
 cluster tightly together, and separately whether biological replicates of
 one Biolgroup are well separated from other groups.
 
+Default colors are green/magenta rather than the more conventional
+green/red -- red-green colorblindness (the most common form) makes the two
+indistinguishable; magenta stays distinguishable from green under all
+common forms of color vision deficiency.
+
 This module is Qt-free and unit-tested (see ``tests/test_clusterpurity.py``).
 """
 
 
-def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='red', neutral_color='black'):
+def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='magenta', neutral_color='black'):
     """Build a ``link_color_func`` for ``scipy.cluster.hierarchy.dendrogram``.
 
     Three-way coloring, classified by comparing the two children's label
     sets (not by simply asking "is the merge result impure", which would
-    paint every ancestor of a single mixing event red all the way to the
-    root):
+    paint every ancestor of a single mixing event false_color all the way to
+    the root):
 
     - ``true_color`` ("monophyletic"): the two children's label sets are
       identical and contain exactly one label -- every leaf under this link
@@ -35,9 +40,9 @@ def purity_link_color_func(Z, leaf_labels, true_color='green', false_color='red'
       contradict each other; it's a clean bridge even if one or both
       children are themselves impure from a *different* label's tangle
       further down. This is what keeps a single low-level tangle from
-      cascading red all the way up the tree: once a tangled label's clade
-      stops growing (nothing more of that label to fold in), every merge
-      above it only ever joins disjoint regions, so it reverts to
+      cascading false_color all the way up the tree: once a tangled label's
+      clade stops growing (nothing more of that label to fold in), every
+      merge above it only ever joins disjoint regions, so it reverts to
       ``neutral_color``.
 
     Args:

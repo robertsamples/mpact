@@ -13,7 +13,7 @@ import pytest
 
 from ordination import (
     load_ordination_matrix, nmds_loading_proxy, replicate_label_components,
-    run_nmds, run_pca, run_plsda, top_loadings,
+    run_nmds, run_pca, run_plsda, similarity_matrix, top_loadings,
 )
 
 
@@ -184,6 +184,50 @@ def test_nmds_smoke_test_on_clustered_data():
     proxy = nmds_loading_proxy(x, scores)
     assert proxy.shape == (8, 2)
     assert proxy.values.min() >= -1.0001 and proxy.values.max() <= 1.0001
+
+
+# --------------------------------------------------------------------------- #
+# similarity_matrix
+# --------------------------------------------------------------------------- #
+
+def test_similarity_matrix_spearman_self_correlation_is_one():
+    x = pd.DataFrame(
+        [[1.0, 2.0, 3.0], [3.0, 2.0, 1.0], [1.0, 5.0, 2.0]],
+        index=['s1', 's2', 's3'], columns=['f1', 'f2', 'f3'],
+    )
+    sim = similarity_matrix(x, 'Spearman')
+    assert sim.shape == (3, 3)
+    assert np.allclose(np.diag(sim.values), 1.0)
+    # s1 and s2 are perfectly rank-anticorrelated.
+    assert sim.loc['s1', 's2'] == pytest.approx(-1.0)
+
+
+def test_similarity_matrix_jaccard_identical_presence_is_one():
+    # s1/s2 detect exactly the same features (different abundances);
+    # s3 detects none of them.
+    x = pd.DataFrame(
+        [[5.0, 0.0, 2.0], [50.0, 0.0, 20.0], [0.0, 0.0, 0.0]],
+        index=['s1', 's2', 's3'], columns=['f1', 'f2', 'f3'],
+    )
+    sim = similarity_matrix(x, 'Jaccard')
+    assert sim.loc['s1', 's2'] == pytest.approx(1.0)
+    assert np.allclose(np.diag(sim.values)[:2], 1.0)
+
+
+def test_similarity_matrix_braycurtis_identical_profiles_is_one():
+    x = pd.DataFrame(
+        [[1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [10.0, 0.0, 0.0]],
+        index=['s1', 's2', 's3'], columns=['f1', 'f2', 'f3'],
+    )
+    sim = similarity_matrix(x, 'Bray-Curtis')
+    assert sim.loc['s1', 's2'] == pytest.approx(1.0)
+    assert sim.loc['s1', 's3'] < sim.loc['s1', 's2']
+
+
+def test_similarity_matrix_unknown_method_raises():
+    x = pd.DataFrame([[1.0, 2.0]], index=['s1'], columns=['f1', 'f2'])
+    with pytest.raises(ValueError):
+        similarity_matrix(x, 'Pearson')
 
 
 # --------------------------------------------------------------------------- #

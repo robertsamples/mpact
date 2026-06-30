@@ -90,4 +90,6 @@ python -m pytest code/tests -q
 ```
 
 GUI behaviour itself can't be tested headlessly and needs to be checked by
-running the app — see [Development](development.md).
+running the app — see
+[`devnotes.md`](https://github.com/robertsamples/mpact/blob/main/devnotes.md)
+in the repo root.

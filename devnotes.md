@@ -309,8 +309,8 @@ documented further down, formerly/newly local to this tab respectively):
     group, i.e. the groups are separable.
 - **Color** — how to render purity:
   - **Purity** (default): green wherever a branch's leaves are entirely one
-    group (correctly clustered), red wherever a branch mixes more than one
-    group (polyphyletic) — a QC judgment visible at a glance rather than
+    group (correctly clustered), magenta wherever a branch mixes more than
+    one group (polyphyletic) — a QC judgment visible at a glance rather than
     read off leaf labels one at a time. The plot title reports
     `n_pure/n_total` (e.g. "7/9 samples' replicates clustered together",
     "3/3 biological groups separable") via `clusterpurity.purity_summary()`.
@@ -326,18 +326,19 @@ documented further down, formerly/newly local to this tab respectively):
 Both views' purity math is the same Qt-free linkage-traversal logic in
 `clusterpurity.py`, unit-tested in `tests/test_clusterpurity.py`.
 
-- **Red marks proven non-monophyly (overlap), not "any impure merge"**: two
-  earlier attempts both got this wrong in opposite directions. First, every
-  impure merge was colored red, including every ancestor above a single
-  mixing event all the way to the root -- since almost any real dataset has
-  *some* mixing somewhere, this painted most of the tree's upper structure
-  red regardless of how localized the problem was. The second attempt
-  ("impure but at least one child was pure = bridge = red, both children
-  already impure = neutral") fixed the worst of the cascading but still
-  mis-colored real data: it could still mark a high-level merge red merely
-  because one side happened to be a single freshly-introduced pure clade,
-  *and* it could miss real tangles where two already-impure children share
-  a label without one side being trivially pure.
+- **`false_color` marks proven non-monophyly (overlap), not "any impure
+  merge"**: two earlier attempts both got this wrong in opposite directions.
+  First, every impure merge was colored `false_color`, including every
+  ancestor above a single mixing event all the way to the root -- since
+  almost any real dataset has *some* mixing somewhere, this painted most of
+  the tree's upper structure regardless of how localized the problem was.
+  The second attempt ("impure but at least one child was pure = bridge =
+  `false_color`, both children already impure = neutral") fixed the worst
+  of the cascading but still mis-colored real data: it could still mark a
+  high-level merge `false_color` merely because one side happened to be a
+  single freshly-introduced pure clade, *and* it could miss real tangles
+  where two already-impure children share a label without one side being
+  trivially pure.
 
   `purity_link_color_func()` now compares the two children's label sets
   directly at each merge:
@@ -350,18 +351,26 @@ Both views' purity math is the same Qt-free linkage-traversal logic in
     in, every merge above it only ever joins disjoint regions, so it goes
     back to black.
   - **overlap** (share >=1 label, without being identical-and-singleton) ->
-    polyphyletic (`false_color`/red) -- definitive proof that some label's
-    leaves are split across this exact merge (present on both sides), not
-    just "still mixed from an earlier merge".
+    polyphyletic (`false_color`/magenta) -- definitive proof that some
+    label's leaves are split across this exact merge (present on both
+    sides), not just "still mixed from an earlier merge".
 
   Verified against the real example dataset's bootstrap dendrogram (the
   case that exposed both earlier bugs): only the two merges that actually
   re-unite a scattered sample's replicates (e.g. one sample's reps split
   into two non-sister sub-clades that only meet again higher up) render
-  red; the higher-level merges joining that region with cleanly-resolved,
-  unrelated samples stay black, same as a hand-built synthetic linkage
-  (`tests/test_clusterpurity.py`'s `_scattered_pair_linkage`) reproducing
-  the same pattern deterministically.
+  `false_color`; the higher-level merges joining that region with
+  cleanly-resolved, unrelated samples stay black, same as a hand-built
+  synthetic linkage (`tests/test_clusterpurity.py`'s
+  `_scattered_pair_linkage`) reproducing the same pattern deterministically.
+
+  `true_color`/`false_color` default to green/magenta, not the more
+  conventional green/red: red-green colorblindness (the most common form)
+  can't distinguish red from green, while magenta stays distinguishable
+  from green under all common forms of color vision deficiency. (Changed
+  from an original green/red default after user feedback; see
+  `clusterpurity.py`'s `purity_link_color_func()` default args and
+  `plotting.py`'s `plot_dendrogram.plot()` call site.)
 - **Bootstrap is now a per-tab checkbox, not a global one**: the
   plot-config dialog's "Bootstrap Analysis" checkbox (`checkBox_bootstrap`)
   only ever affected this one plot, so it moved into `plot_dendrogram`'s own
@@ -497,6 +506,68 @@ other plot already worked, not a new inconsistency.
   axes count is stable across `.reset()` calls (not growing — would mean
   old axes/figures were leaking), and (3) no PNG got written to disk by
   either plot anymore.
+
+## Sample correlation matrix (`plotting.plot_samplecorr`, `ordination.similarity_matrix`)
+
+Used to be a hardcoded Spearman-only heatmap with technical replicates
+always pre-averaged and no way to relabel the raw injection/sample names.
+Now has a Method (Spearman/Jaccard/Bray-Curtis) switcher, a View
+(Biological Replicates/Individual Injections/Biological Groups) switcher,
+and a "Use Sample/Group Names" checkbox — same nomenclature and
+`ordination.replicate_label_components()` reuse as `plot_dendrogram`'s.
+
+- **`ordination.similarity_matrix(x, method)`** is the new Qt-free backend
+  (covered by `test_ordination.py`): `x` is samples x features, same
+  convention as `run_pca`/`run_nmds`/`run_plsda`. Spearman is
+  `x.transpose().corr(method='spearman')`; Jaccard/Bray-Curtis go through
+  `sklearn.metrics.pairwise_distances` (`metric='jaccard'`/`'braycurtis'`)
+  and return `1 - distance`. Jaccard is computed on `x > 0` (presence/
+  absence of detection, ignoring abundance) — deliberately *not* derived
+  from the groupset query-dict machinery the user floated as a possible
+  source, since that's per-feature-list bookkeeping for the UpSet/treemap
+  tabs, a different concept from per-sample/group detection.
+  Pearson/Kendall were considered and rejected: Pearson assumes
+  normally-distributed abundances (the wrong fit for heavy-tailed LC-MS
+  intensities, same reasoning that makes Spearman the established choice
+  here), Kendall is a slower, largely redundant rank-correlation
+  alternative to Spearman.
+- **Controls live in the *shared* `frame_12`/`horizontalLayout_25` nav
+  bar** (the one holding the pre-existing `btn_upsetplt`/`btn_samplecorr`
+  buttons that switch `stackedWidget_grpanalysis`), not in this plot's own
+  canvas frame — unlike `plot_dendrogram`/`plot_ordination`'s per-canvas
+  switcher bars, these controls are specific to the Sample Correlations
+  page but the nav bar is shared with the unrelated UpSet Plot page.
+  `plot_samplecorr._build_grpanalysis_controls()` appends a stretch then
+  its own control widget onto the existing layout (no `ui_main.py` edit)
+  so the new controls sit to the right of the two buttons and the bar
+  stays a single row regardless of window width.
+- **Greying out on the UpSet Plot tab**: `ui_functions.py`'s
+  `btn_upsetplt`/`btn_samplecorr` click handlers used to call
+  `stackedWidget_grpanalysis.setCurrentIndex()` directly; they now route
+  through `UIFunctions.switch_grpanalysis_tab(self, idx)`, which also calls
+  `self.samplecorr.set_controls_enabled(idx == 1)` (guarded by
+  `getattr(self, 'samplecorr', None) is not None`, since this can fire
+  before any analysis has run and created the plot object). The Designer
+  default for `stackedWidget_grpanalysis` is already index 1
+  (Sample Correlations), so the controls start enabled, matching the
+  default active page.
+- **View → row/column construction**: "Biological Replicates" and
+  "Individual Injections" reuse `ordination.load_ordination_matrix()`
+  exactly like `plot_dendrogram` does (`collapse_replicates=True`/`False`).
+  "Biological Groups" takes the collapsed (Biological Replicates) matrix
+  and does one more `x.groupby(biolgroup).mean()` to average across
+  biological replicates too — deliberately not a third mode inside
+  `load_ordination_matrix` itself, since it's a trivial one-line reduction
+  of an already-correct, already-tested intermediate result.
+- **Heatmap `vmin` is `0` for all three methods**, including Spearman.
+  Spearman is mathematically capable of going negative, but real
+  sample-vs-sample correlations in this kind of data cluster tightly
+  positive (e.g. 0.7-1.0) — a `-1..1` scale (tried first) compressed all of
+  that meaningful variation into a sliver of the colour range, making the
+  heatmap look uniformly dark/uninformative. `0..1` keeps the full colour
+  range usable for the variation that actually occurs.
+- Dropped the dead `iondict = cached_read_csv(...)` read that was never
+  actually used by the old `plot()` body.
 
 ## Conventions
 

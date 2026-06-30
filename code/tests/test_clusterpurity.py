@@ -72,18 +72,18 @@ def test_purity_link_color_func_clean_disjoint_groups_stay_neutral_even_at_root(
         assert color_func(node_id) == 'green'
 
 
-def test_purity_link_color_func_overlap_is_the_only_red_and_it_does_not_cascade():
+def test_purity_link_color_func_overlap_is_the_only_false_color_and_it_does_not_cascade():
     Z, labels = _scattered_pair_linkage()
     color_func = purity_link_color_func(Z, labels)
 
-    assert color_func(5) == 'green'  # Q+Q, monophyletic
-    assert color_func(6) == 'black'  # P + {Q}: disjoint, clean bridge
-    assert color_func(7) == 'red'    # P + {P,Q}: OVERLAP -- the actual tangle
+    assert color_func(5) == 'green'    # Q+Q, monophyletic
+    assert color_func(6) == 'black'    # P + {Q}: disjoint, clean bridge
+    assert color_func(7) == 'magenta'  # P + {P,Q}: OVERLAP -- the actual tangle
     # R joining afterward is disjoint from {P,Q} -- R was never part of the
-    # P/Q mixing, so this must NOT also render red just because it's above
-    # (contains) the node-7 tangle. This is the specific behaviour this
-    # rule exists for: a real, low-level tangle must not paint every
-    # ancestor red all the way to the root.
+    # P/Q mixing, so this must NOT also render false_color just because it's
+    # above (contains) the node-7 tangle. This is the specific behaviour
+    # this rule exists for: a real, low-level tangle must not paint every
+    # ancestor false_color all the way to the root.
     assert color_func(8) == 'black'
 
 
