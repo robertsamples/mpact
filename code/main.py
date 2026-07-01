@@ -1411,9 +1411,10 @@ class MainWindow(QMainWindow):
         # restore side is loadsession()'s restore_checkbox_fields() call.
         save_checkbox_fields(self, self.analysis_paramsgui)
 
-        self.analysis_paramsgui.pqthresh = float(self.dialog.ui.lineEdit_pqthresh.text())
-        self.analysis_paramsgui.fcthresh = float(self.dialog.ui.lineEdit_fcthresh.text())
-        self.analysis_paramsgui.colorscheme = self.dialog.ui.combo_colorscheme.currentText()
+        # pqthresh / fcthresh / colorscheme moved to the volcano & heatmap plots'
+        # own live control bars (plotting.py); no longer sourced from the dialog
+        # here, and intentionally not persisted to .mpct (same as the dendrogram's
+        # per-plot controls).
         self.analysis_paramsgui.relfil = self.ui.checkBox_mp.isChecked()
         self.analysis_paramsgui.CVfil = self.ui.checkBox_cv.isChecked()
         self.analysis_paramsgui.decon = self.ui.checkBox_decon.isChecked()

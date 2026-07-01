@@ -25,7 +25,8 @@ CHECKBOX_FIELDS = (
     ('Dendrogram', ('ui', 'checkBox_dend')),
     ('MZRTplt', ('ui', 'checkBox_mzrt')),
     ('KMD', ('ui', 'checkBox_kmd')),
-    ('mdguide', ('dialog.ui', 'checkBox_mdguide')),
+    # 'mdguide' moved to the mass-defect plot's own live control bar
+    # (plotting.kendrick); no longer a dialog checkbox or a persisted field.
     ('FC', ('ui', 'checkBox_fc')),
     ('FC3Dplt', ('ui', 'checkBox_3dfc')),
     ('Ttest', ('ui', 'checkBox_ttest')),

@@ -50,14 +50,14 @@ _MAINBAR_TABS = {
 #                        [(action, dialog.ui widget attr), ...] applied after reset)
 _PLOTBAR_TABS = {
     'review':  (0, 1, 'btn_review',  []),
-    'upset':   (1, 9, 'btn_upset',   [('show', 'frame_colorscheme')]),
+    'upset':   (1, 9, 'btn_upset',   []),
     'dend':    (1, 2, 'btn_dend',    []),
     'pca':     (1, 3, 'btn_pca',     [('show', 'frame_2')]),
     'mzrt':    (0, 4, 'btn_mzrt',    []),
-    'kmd':     (0, 5, 'btn_kmd',     [('show', 'frame_mdguide')]),
+    'kmd':     (0, 5, 'btn_kmd',     []),
     '3dfc':    (0, 6, 'btn_3dfc',    []),
-    'volcano': (0, 7, 'btn_volcano', [('show', 'frame_volcanoparams')]),
-    'heatmap': (0, 8, 'btn_heatmap', [('show', 'frame_colorscheme')]),
+    'volcano': (0, 7, 'btn_volcano', []),
+    'heatmap': (0, 8, 'btn_heatmap', []),
 }
 
 # Nav-button stylesheets. Defined once here instead of being rebuilt on
@@ -541,10 +541,12 @@ class UIFunctions(MainWindow):
         # ----- statistics / plot params -----
         restore('experimental group', lambda: self.ui.combo_expgrp.setCurrentText(str(p.statstgrps[0])))
         restore('control group', lambda: self.ui.combo_ctrgrp.setCurrentText(str(p.statstgrps[1])))
-        restore('colour scheme', lambda: self.dialog.ui.combo_colorscheme.setCurrentText(p.colorscheme))
-        restore('p/q threshold', lambda: self.dialog.ui.lineEdit_pqthresh.setText(str(p.pqthresh)))
-        restore('fold-change threshold', lambda: self.dialog.ui.lineEdit_fcthresh.setText(str(p.fcthresh)))
-                
+        # colour scheme / p/q threshold / fold-change threshold are no longer
+        # restored here -- they moved to the heatmap & volcano plots' own live
+        # control bars and are intentionally not persisted (same as the
+        # dendrogram's per-plot controls). Old .mpct files that still carry these
+        # values simply ignore them on load.
+
     def getfilename(self):
             self.filename, _  = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir ,
                                                                            "*.csv *.txt")

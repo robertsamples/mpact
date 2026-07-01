@@ -46,42 +46,14 @@ import time
 
 from pvclust import PvClust
 
-class NavigationToolbar(NavigationToolbar2QT):
-        """
-        This is a subclass of the NavigationToolbar2QT that provides additional functionality. It is responsible for creating a custom button in the plot toolbar. The custom button is used to configure the plot.
+# The plot toolbars previously used a NavigationToolbar2QT subclass whose only
+# addition was a cog "Configure" button that opened the plot-config dialog.
+# Every option that dialog held has since moved onto the individual plots' own
+# control bars, so the dialog (and the cog that launched it) is redundant --
+# reverted to matplotlib's stock toolbar. The name is kept as an alias so the
+# existing NavigationToolbar(canvas, parent) call sites don't change.
+NavigationToolbar = NavigationToolbar2QT
 
-        Constructor arguments:
-        - canvas: a FigureCanvasQTAgg instance representing the plot canvas
-        - parent: the parent widget
-        
-        Attributes:
-        - clearButtons: a list of QToolButton instances representing the plot toolbar buttons
-        - picker: a QAction instance representing the custom button
-        
-        Methods:
-        - __init__(self, canvas, parent): constructs a NavigationToolbar instance
-        """
-        def __init__(self, canvas, parent):
-            NavigationToolbar2QT.__init__(self,canvas,parent)
-            self.clearButtons=[]
-            next=None
-            for c in self.findChildren(QToolButton):
-                if next is None:
-                    next=c
-                if str(c.text()) in ('Pan','Zoom','Subplots'):
-                    self.clearButtons.append(c)
-                    next=None 
-            # create custom button
-            icon = QtGui.QIcon("cog.ico")
-            picker=QAction("Pick",self)
-            picker.setIcon(icon)
-            picker.setToolTip("Configure")
-            self.picker = picker
-            button=QToolButton(self)
-            button.setDefaultAction(self.picker) 
-            button.clicked.connect(lambda: parent.dialog.show())
-            self.addWidget(button)
-        
 def _is_duplicate_pick(parent, event):
     """True if this pick event's underlying mouse click already triggered a
     pick on another overlapping artist.
@@ -401,19 +373,37 @@ class plot_heatmap():
         frame (object): The object that the heatmap will be added to.
         file (str): The file that contains the data for the heatmap.
     """
+    VIEWS = ('Technical Replicates', 'Biological Replicates')
+
     def __init__(self, parent, currplt, frame, file):
-        msdata = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep = ',', header = [2], index_col = [0]).iloc[:,2:]
-        cm = sns.clustermap(msdata, standard_scale=0, metric="euclidean", method="ward", cmap = parent.analysis_paramsgui.colorscheme) #viridis
+        # Colour scheme / View / Use-names: moved off the global plot-config
+        # dialog onto this plot's own control bar, all live. Colour default
+        # 'rocket' matches the old combo's first item; View defaults to
+        # "Technical Replicates" (every injection its own column -- the plot's
+        # previous behaviour). Cache the creation args so the control handlers
+        # can call reset() with them.
+        self.colorscheme = 'rocket'
+        self.view = 'Technical Replicates'
+        self.use_sample_names = False
+        self._parent, self._currplt, self._frame, self._file = parent, currplt, frame, file
+        msdata = self._heatmap_matrix(parent)
+        cm = sns.clustermap(msdata, standard_scale=0, metric="euclidean", method="ward", cmap = self.colorscheme) #viridis
         parent.cmind = cm.dendrogram_row.reordered_ind #saves reordered index so that we can increment selection up and down.
         parent.fig[currplt] = cm.fig
         parent.pltlayout[currplt] = QtWidgets.QVBoxLayout()
+        # Hug the control bar to the top edge -- the default QVBoxLayout margins
+        # left a noticeably larger gap above this plot's option bar than the
+        # other plots' bars.
+        parent.pltlayout[currplt].setContentsMargins(0, 0, 0, 0)
+        parent.pltlayout[currplt].setSpacing(0)
         parent.canvas[currplt] = FigureCanvas(parent.fig[currplt])
         parent.pltlayout[currplt].addWidget(parent.canvas[currplt])
         parent.toolbar[currplt] = NavigationToolbar(parent.canvas[currplt], parent)
         parent.toolbar[currplt].setStyleSheet("background-color:rgba(225,225,225,255);")
         parent.pltlayout[currplt].addWidget(parent.toolbar[currplt])
         parent.ui.frame_heatmap.setLayout(parent.pltlayout[currplt])
-        
+        self._build_control_bar(parent, currplt)
+
         self.plotbackground = (.89, .89, .89, 0)
         parent.canvas[currplt].figure.set_facecolor(self.plotbackground)
         self.fcsfont = {'fontname':'Bahnschrift',
@@ -465,10 +455,89 @@ class plot_heatmap():
         #parent.canvas[currplt].figure.axes[2].set_xticklabels(colind, rotation=0)
         parent.canvas[currplt].draw()
         
+    def _heatmap_matrix(self, parent):
+        """Features x samples matrix for the clustermap, honouring the View and
+        Use-Names controls.
+
+        Feature ROWS are always kept in the peak table's file order (header=[2])
+        regardless of view, so the cmind/heatind feature<->row mapping used by
+        onpick8 and MainWindow's highlight/W-S navigation stays valid -- only the
+        columns (and their labels) change between views."""
+        pltfile = parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv')
+        msdata = cached_read_csv(pltfile, sep=',', header=[2], index_col=[0]).iloc[:, 2:]
+        raw_header = cached_read_csv(pltfile, sep=',', header=None, index_col=[0, 1, 2]).iloc[:3, :].transpose()
+        raw_header.columns = ['Biolgroup', 'Sample', 'Injection']
+        if self.view == 'Biological Replicates':
+            # Average technical replicates (injection columns) within each
+            # Sample. Group only the columns (via transpose) so the feature row
+            # order is untouched.
+            sample_of_injection = raw_header.set_index('Injection')['Sample']
+            msdata = msdata.transpose().groupby(sample_of_injection).mean().transpose()
+        if self.use_sample_names:
+            msdata = msdata.copy()
+            msdata.columns = self._display_labels(raw_header, msdata.columns.tolist())
+        return msdata
+
+    def _display_labels(self, raw_header, textlabels):
+        """Short ``Biolgroup_b#[_s#]`` column labels in place of the raw
+        injection/sample names, mirroring plot_dendrogram's labelling."""
+        components = ordination.replicate_label_components(raw_header)
+        if self.view == 'Biological Replicates':
+            per_sample = components.drop_duplicates('Sample').set_index('Sample')
+            return [f"{per_sample.loc[s, 'Biolgroup']}_b{per_sample.loc[s, 'BioRep']}" for s in textlabels]
+        return [
+            f"{components.loc[inj, 'Biolgroup']}_b{components.loc[inj, 'BioRep']}_s{components.loc[inj, 'TechRep']}"
+            for inj in textlabels
+        ]
+
+    def _build_control_bar(self, parent, currplt):
+        bar = QtWidgets.QWidget()
+        bar.setStyleSheet(_SWITCHER_BAR_STYLE)
+        bar.setMaximumHeight(_SWITCHER_BAR_HEIGHT)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+
+        layout.addWidget(QtWidgets.QLabel('View:'))
+        view_combo = QtWidgets.QComboBox()
+        view_combo.addItems(self.VIEWS)
+        view_combo.setCurrentText(self.view)
+        view_combo.currentTextChanged.connect(self._on_view_changed)
+        layout.addWidget(view_combo)
+
+        layout.addWidget(QtWidgets.QLabel('Color scheme:'))
+        color_combo = QtWidgets.QComboBox()
+        color_combo.addItems(_COLORSCHEMES)
+        color_combo.setCurrentText(self.colorscheme)
+        color_combo.currentTextChanged.connect(self._on_colorscheme_changed)
+        layout.addWidget(color_combo)
+
+        use_names_check = QtWidgets.QCheckBox('Use Sample/Group Names')
+        use_names_check.setChecked(self.use_sample_names)
+        use_names_check.toggled.connect(self._on_use_names_toggled)
+        layout.addWidget(use_names_check)
+        layout.addStretch()
+
+        self.view_combo = view_combo
+        self.color_combo = color_combo
+        self.use_names_check = use_names_check
+        parent.pltlayout[currplt].insertWidget(0, bar)
+
+    def _on_colorscheme_changed(self, scheme):
+        self.colorscheme = scheme
+        self.reset(self._parent, self._currplt, self._frame, self._file)
+
+    def _on_view_changed(self, view):
+        self.view = view
+        self.reset(self._parent, self._currplt, self._frame, self._file)
+
+    def _on_use_names_toggled(self, checked):
+        self.use_sample_names = checked
+        self.reset(self._parent, self._currplt, self._frame, self._file)
+
     def reset(self, parent, currplt, frame, file):
         #makes new figure with updated heatmap and saves
-        msdata = cached_read_csv(parent.analysis_paramsgui.outputdir / (parent.analysis_paramsgui.filename.stem + '_filtered.csv'), sep = ',', header = [2], index_col = [0]).iloc[:,2:]
-        cm2 = sns.clustermap(msdata, standard_scale=0, metric="euclidean", method="ward", cmap = parent.analysis_paramsgui.colorscheme) #viridis
+        msdata = self._heatmap_matrix(parent)
+        cm2 = sns.clustermap(msdata, standard_scale=0, metric="euclidean", method="ward", cmap = self.colorscheme) #viridis
         parent.cmind = cm2.dendrogram_row.reordered_ind
         updatedfig = cm2.fig
         parent.canvas[currplt].figure.clf()
@@ -568,7 +637,7 @@ class plot_mzrt(ui_plot):
         parent.highlight[self.currplt], = parent.ax[self.currplt].plot([], [], 'o', markersize=12, color='yellow')
         parent.ax[self.currplt].set_xlabel("Retention time (min)", **self.fcsfont)
         parent.ax[self.currplt].set_ylabel('m/z', **self.fcsfont)
-        parent.ax[self.currplt].set_xlim(-.5, 11.5)
+        parent.ax[self.currplt].set_xlim(0, 11.5)
         parent.ax[self.currplt].set_ylim(0, 1850)
         parent.ax[self.currplt].legend()
         
@@ -623,6 +692,10 @@ class plot_samplecorr(ui_plot):
         self.view = 'Biological Replicates'
         self.method = 'Spearman'
         self.use_sample_names = False
+        # Colour scheme shares the same param the heatmap tab uses; it moved off
+        # the global plot-config dialog (combo_colorscheme) so this plot keeps
+        # its own live copy here rather than reading a now-removed dialog widget.
+        self.colorscheme = 'rocket'
         self._build_grpanalysis_controls(parent)
         self.plot(parent, file, filtereddfs, groupsets)
 
@@ -652,9 +725,17 @@ class plot_samplecorr(ui_plot):
         use_names_check.toggled.connect(self._on_use_sample_names_toggled)
         layout.addWidget(use_names_check)
 
+        layout.addWidget(QtWidgets.QLabel('Color:'))
+        color_combo = QtWidgets.QComboBox()
+        color_combo.addItems(_COLORSCHEMES)
+        color_combo.setCurrentText(self.colorscheme)
+        color_combo.currentTextChanged.connect(self._on_colorscheme_changed)
+        layout.addWidget(color_combo)
+
         self.method_combo = method_combo
         self.view_combo = view_combo
         self.use_names_check = use_names_check
+        self.color_combo = color_combo
         self.controls_bar = bar
 
         # Pushes the new controls to the right of the pre-existing
@@ -678,6 +759,10 @@ class plot_samplecorr(ui_plot):
 
     def _on_use_sample_names_toggled(self, checked):
         self.use_sample_names = checked
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_colorscheme_changed(self, scheme):
+        self.colorscheme = scheme
         self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
 
     def _load_matrix(self, parent):
@@ -730,7 +815,7 @@ class plot_samplecorr(ui_plot):
         # (e.g. 0.7-1.0) -- a -1..1 scale would compress all of that
         # meaningful variation into a sliver of the colour range. 0..1 for
         # every method keeps the full range informative.
-        sns.heatmap(pmatrix, ax=ax, cmap=self.parent.analysis_paramsgui.colorscheme, vmin=0, vmax=1)
+        sns.heatmap(pmatrix, ax=ax, cmap=self.colorscheme, vmin=0, vmax=1)
         ax.tick_params(axis='both', which='both', labelsize=10)
         ax.set_xticks(range(len(pmatrix.columns)))
         ax.set_xticklabels(display_labels, rotation=90)
@@ -760,15 +845,42 @@ class kendrick(ui_plot):
         super().__init__(parent, currplt, frame)
         self.parent = parent
         self.currplt = currplt
+        # Mass-defect guideline reference lines: moved off the global plot-config
+        # dialog (checkBox_mdguide) onto this plot's own control bar, live (a
+        # toggle re-renders immediately via reset()), the same pattern as
+        # plot_dendrogram's switcher bar. Default on, matching the old checkbox's
+        # Designer default.
+        self.show_mdguide = True
+        self._build_control_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
+
+    def _build_control_bar(self, parent, currplt):
+        bar = QtWidgets.QWidget()
+        bar.setStyleSheet(_SWITCHER_BAR_STYLE)
+        bar.setMaximumHeight(_SWITCHER_BAR_HEIGHT)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+        guide_check = QtWidgets.QCheckBox('Mass Defect Guidelines')
+        guide_check.setChecked(self.show_mdguide)
+        guide_check.toggled.connect(self._on_mdguide_toggled)
+        layout.addWidget(guide_check)
+        layout.addStretch()
+        self.guide_check = guide_check
+        parent.pltlayout[currplt].insertWidget(0, bar)
+
+    def _on_mdguide_toggled(self, checked):
+        self.show_mdguide = checked
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
 
     def plot(self, parent, file, filtereddfs, groupsets):
         """
         The method first reads the input file as a pandas dataframe iondict. If the blnkfltr parameter in parent.analysis_paramsgui is True, then the dataframes in filtereddfs are filtered to exclude blank data.
         For each element in filtereddfs, the nominal mass (m/z) and mass defect (kmd) data is plotted as a scatter plot. The color of each point is determined by the plotcol parameter in groupsets. The legendname parameter in groupsets is used to label the points in the plot.
-        If the mdguide parameter in parent.analysis_paramsgui is True, then reference lines are plotted.
-        less
+        If self.show_mdguide is True (the per-plot "Mass Defect Guidelines" checkbox), then reference lines are plotted.
         """
+        self._last_file = file
+        self._last_filtereddfs = filtereddfs
+        self._last_groupsets = groupsets
         iondict = pd.read_csv(file, sep=',', header=0, index_col=None)
 
         if parent.analysis_paramsgui.blnkfltr:
@@ -791,12 +903,17 @@ class kendrick(ui_plot):
         parent.ax[self.currplt].legend()
         self.event = parent.canvas[self.currplt].figure.canvas.mpl_connect('pick_event', lambda event: self.onpick(event, parent, iondict, ('m/z', 'kmd')))
         parent.fig[self.currplt].subplots_adjust(left=0.1, right=0.95, bottom=0.15, top=0.9, hspace=0.2, wspace=0.2)
-        parent.canvas[self.currplt].draw()
 
-        if parent.analysis_paramsgui.mdguide:
+        # Draw the guideline reference lines BEFORE canvas.draw() -- they used to
+        # be added after draw(), so re-checking the box added the artists but
+        # never repainted (the lines only reappeared on the next unrelated
+        # redraw). Adding them before the draw() makes the toggle symmetric.
+        if self.show_mdguide:
             parent.ax[self.currplt].plot([0, 733.314], [0.00112, 0.8408], color='dimgrey', linestyle='-', linewidth=1)
             parent.ax[self.currplt].plot([63.6623, 733.314], [1, 0.8408], color='dimgrey', linestyle='-', linewidth=1)
             parent.ax[self.currplt].plot([0, 465.456], [0.9884, 0.5408], color='dimgrey', linestyle='-', linewidth=1)
+
+        parent.canvas[self.currplt].draw()
 
 class plot_volcano(ui_plot): 
     """
@@ -806,9 +923,67 @@ class plot_volcano(ui_plot):
         super().__init__(parent, currplt, frame)
         self.parent = parent
         self.currplt = currplt
+        # Significance thresholds: moved off the global plot-config dialog
+        # (lineEdit_pqthresh/lineEdit_fcthresh) onto this plot's own control bar,
+        # live (editing a value re-renders immediately), same pattern as
+        # plot_dendrogram. Defaults match the old line-edits' Designer text.
+        self.pqthresh = 0.05
+        self.fcthresh = 1.5
+        self._build_control_bar(parent, currplt)
         self.plot(parent, file, filtereddfs, groupsets)
 
+    def _build_control_bar(self, parent, currplt):
+        bar = QtWidgets.QWidget()
+        bar.setStyleSheet(_SWITCHER_BAR_STYLE)
+        bar.setMaximumHeight(_SWITCHER_BAR_HEIGHT)
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+
+        layout.addWidget(QtWidgets.QLabel('p/q threshold:'))
+        pq_edit = QtWidgets.QLineEdit(str(self.pqthresh))
+        pq_edit.setMaximumWidth(70)
+        pq_edit.editingFinished.connect(self._on_pqthresh_changed)
+        layout.addWidget(pq_edit)
+
+        layout.addWidget(QtWidgets.QLabel('Fold-change threshold:'))
+        fc_edit = QtWidgets.QLineEdit(str(self.fcthresh))
+        fc_edit.setMaximumWidth(70)
+        fc_edit.editingFinished.connect(self._on_fcthresh_changed)
+        layout.addWidget(fc_edit)
+        layout.addStretch()
+
+        self.pq_edit = pq_edit
+        self.fc_edit = fc_edit
+        parent.pltlayout[currplt].insertWidget(0, bar)
+
+    def _on_pqthresh_changed(self):
+        # editingFinished can fire on focus-out even when nothing changed; parse
+        # defensively and revert the field (rather than re-rendering) on bad input.
+        try:
+            val = float(self.pq_edit.text())
+        except ValueError:
+            self.pq_edit.setText(str(self.pqthresh))
+            return
+        if val == self.pqthresh:
+            return
+        self.pqthresh = val
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
+    def _on_fcthresh_changed(self):
+        try:
+            val = float(self.fc_edit.text())
+        except ValueError:
+            self.fc_edit.setText(str(self.fcthresh))
+            return
+        if val == self.fcthresh:
+            return
+        self.fcthresh = val
+        self.reset(self._last_file, self._last_filtereddfs, self._last_groupsets)
+
     def plot(self, parent, file, filtereddfs, groupsets):
+        self._last_file = file
+        self._last_filtereddfs = filtereddfs
+        self._last_groupsets = groupsets
         pqvar = '-logq' if parent.analysis_paramsgui.FDR else '-logp'
         parent.ui.lbl_volcanowarn.setText('' if parent.analysis_paramsgui.FDR else 'False discovery rate correction off')
 
@@ -836,8 +1011,8 @@ class plot_volcano(ui_plot):
             if max_val > maxpval:
                 maxpval = max_val
                 
-            sig = filtereddfs[elem][filtereddfs[elem][pqvar] >= -np.log10(parent.analysis_paramsgui.pqthresh)]
-            sig = sig[sig['logfc'].abs() >= np.log2(parent.analysis_paramsgui.fcthresh)]
+            sig = filtereddfs[elem][filtereddfs[elem][pqvar] >= -np.log10(self.pqthresh)]
+            sig = sig[sig['logfc'].abs() >= np.log2(self.fcthresh)]
             nonsig = filtereddfs[elem][~filtereddfs[elem]['Compound'].isin(sig['Compound'].to_list())]
             
             parent.ax[self.currplt].scatter(sig[sig['logfc'] > 0]['logfc'], sig[sig['logfc'] > 0][pqvar], color='red', picker=True, alpha=0.5)
@@ -846,9 +1021,9 @@ class plot_volcano(ui_plot):
         
         parent.highlight[self.currplt], = parent.ax[self.currplt].plot([], [], 'o', markersize=12, color='yellow')
         
-        parent.ax[self.currplt].plot([-np.log2(parent.analysis_paramsgui.fcthresh), -np.log2(parent.analysis_paramsgui.fcthresh)], [0, maxpval*1.2], color='dimgrey', linestyle='-', linewidth=1)
-        parent.ax[self.currplt].plot([np.log2(parent.analysis_paramsgui.fcthresh), np.log2(parent.analysis_paramsgui.fcthresh)], [0, maxpval*1.2], color='dimgrey', linestyle='-', linewidth=1)
-        parent.ax[self.currplt].plot([-6.75, 6.75], [-np.log10(parent.analysis_paramsgui.pqthresh), -np.log10(parent.analysis_paramsgui.pqthresh)], color='dimgrey', linestyle='-', linewidth=1)
+        parent.ax[self.currplt].plot([-np.log2(self.fcthresh), -np.log2(self.fcthresh)], [0, maxpval*1.2], color='dimgrey', linestyle='-', linewidth=1)
+        parent.ax[self.currplt].plot([np.log2(self.fcthresh), np.log2(self.fcthresh)], [0, maxpval*1.2], color='dimgrey', linestyle='-', linewidth=1)
+        parent.ax[self.currplt].plot([-6.75, 6.75], [-np.log10(self.pqthresh), -np.log10(self.pqthresh)], color='dimgrey', linestyle='-', linewidth=1)
         
         parent.ax[self.currplt].set_xlabel("log2 fold change", **self.fcsfont)
         parent.ax[self.currplt].set_ylabel('-log10 ' + pqvar[-1] + '-value', **self.fcsfont)
@@ -903,7 +1078,7 @@ class plot_fc3d(ui_plot):
         parent.ax[self.currplt].set_ylabel('Retention time (min)', **self.fcsfont, labelpad=20)
         parent.ax[self.currplt].set_zlabel('m/z', **self.fcsfont, labelpad=25)
         parent.ax[self.currplt].tick_params(axis='z', pad=10)
-        parent.ax[self.currplt].set_ylim(-0.5, 11.5)
+        parent.ax[self.currplt].set_ylim(0, 11.5)
         parent.ax[self.currplt].grid()
         parent.ax[self.currplt].legend()
         parent.fig[self.currplt].subplots_adjust(
@@ -1115,6 +1290,12 @@ class plot_dendrogram(ui_plot):
 # searchtree's light-on-dark scheme.
 _SWITCHER_BAR_HEIGHT = 32
 
+# matplotlib/seaborn colormap names offered by the heatmap & sample-correlation
+# colour-scheme dropdowns (these moved off the plot-config dialog's
+# combo_colorscheme onto the plots' own bars). Order/contents match the old
+# combo's items; 'rocket' (index 0) stays the default.
+_COLORSCHEMES = ('rocket', 'mako', 'flare', 'crest', 'magma', 'viridis')
+
 _SWITCHER_BAR_STYLE = """
 QWidget {
     background: transparent;
@@ -1140,6 +1321,13 @@ QLabel:disabled {
 }
 QCheckBox:disabled {
     color: rgb(150,150,150);
+}
+QLineEdit {
+    background-color: rgb(255,255,255);
+    color: rgb(30,30,30);
+    border: 1px solid rgb(150,150,150);
+    border-radius: 2px;
+    padding: 2px;
 }
 """
 
