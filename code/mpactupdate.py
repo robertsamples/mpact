@@ -30,8 +30,8 @@ import urllib.request
 #: and create a matching GitHub release/tag (e.g. ``v1.0.1``) on the fork so
 #: this checker can see it. Kept here as the single in-code source of truth;
 #: keep it consistent with main.py's ``label_credits`` display string
-#: (currently shows ``v1.00.01``).
-__version__ = '1.0.01'
+#: (currently shows ``v1.00.02``).
+__version__ = '1.0.02'
 
 DEFAULT_REPO = 'robertsamples/mpact'
 _RELEASES_LATEST = 'https://api.github.com/repos/{repo}/releases/latest'

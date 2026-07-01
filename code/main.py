@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
         #self.show() # makes window reappear, acts like normal window now (on top now but can be underneath if you raise another window)
         
         self.ui.setupUi(self)
-        self.ui.label_credits.setText('v1.00.01 r26.06.29')
+        self.ui.label_credits.setText('v1.00.02 r26.06.30')
 
         # "PCA" was a misnomer left over from when this checkbox/button only
         # ran NMDS (see plotting.plot_ordination) -- the underlying
