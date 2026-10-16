@@ -1,7 +1,6 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
-Modifications Copyright 2026, Robert M. Samples
 """
 
 import pandas as pd
@@ -65,19 +64,15 @@ def groupave(analysis_params):
     print('Averaging groups')
 
     # Calculate total number of rows and set chunk size
-    formatted_path = analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv')
-    # Use a context manager so the file handle is closed promptly (the bare
-    # ``sum(1 for _ in open(...))`` left the handle open until GC -- a
-    # ResourceWarning that surfaced in the test suite).
-    with open(formatted_path) as row_counter:
-        total_rows = sum(1 for _ in row_counter) - 1
-    header = pd.read_csv(formatted_path, nrows=0, header=[0, 1, 2])
+    total_rows = sum(1 for _ in open(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'))) - 1
+    header = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), nrows=0, header=[0, 1, 2])
     total_columns = header.shape[1]
     cells_per_chunk = 100_000
     chunk_size = max(1, cells_per_chunk // total_columns)  # Rows per chunk
 
     # Initialize lists to collect results from each chunk
     sum_values_list = []
+    sum_squares_list = []
     counts_list = []
 
     # Process data in chunks
@@ -95,29 +90,33 @@ def groupave(analysis_params):
             # Set index names according to your data structure
             chunk_stacked.index.names = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']
 
-            # Compute sum and counts per group
+            # Compute sum, sum of squares, and counts per group
             group_levels = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']
             sum_values_chunk = chunk_stacked.groupby(level=group_levels).sum()
+            sum_squares_chunk = (chunk_stacked ** 2).groupby(level=group_levels).sum()
             count_chunk = chunk_stacked.groupby(level=group_levels).count()
 
             # Append results to lists
             sum_values_list.append(sum_values_chunk)
+            sum_squares_list.append(sum_squares_chunk)
             counts_list.append(count_chunk)
 
             pbar.update(1)
 
     # Concatenate all results
     all_sum_values = pd.concat(sum_values_list)
+    all_sum_squares = pd.concat(sum_squares_list)
     all_counts = pd.concat(counts_list)
 
     # Aggregate over the entire dataset
     sum_values_df = all_sum_values.groupby(level=group_levels).sum()
+    sum_squares_df = all_sum_squares.groupby(level=group_levels).sum()
     counts_df = all_counts.groupby(level=group_levels).sum()
 
-    # Calculate mean per injection. (A per-injection variance/stddev was
-    # computed here previously but never used -- the technical/biological
-    # RSDs below are derived from the grouped means, not from it.)
+    # Calculate mean and variance per injection
     mean_values = sum_values_df / counts_df
+    variance_values = (sum_squares_df / counts_df) - (mean_values ** 2)
+    stddev_values = variance_values ** 0.5
 
     # Calculate technical RSDs and counts
     # Group over technical replicates within each sample
@@ -212,10 +211,8 @@ def runfc(analysis_params, statstgrps):
     maxvals = msdata_errprop.max(axis=1) #the max stuff is used to base point opacity based on abundance, have to put in a better location than this
     msdata_errprop = msdata_errprop.loc[:, msdata_errprop.columns.intersection(statstgrps)]
     msdata_errprop['FC']=msdata_errprop[statstgrps[0]]/msdata_errprop[statstgrps[1]]
-    # Use .loc (single-step assignment) instead of chained assignment, which is
-    # deprecated and will stop updating the frame in pandas 3.0.
-    msdata_errprop.loc[msdata_errprop['FC'] >= maxval, 'FC'] = maxval
-    msdata_errprop.loc[msdata_errprop['FC'] <= minval, 'FC'] = minval
+    msdata_errprop['FC'][msdata_errprop['FC'] >= maxval] = maxval
+    msdata_errprop['FC'][msdata_errprop['FC'] <= minval] = minval
     msdata_errprop['max'] = maxvals # this has to be done before resetting the index or else tuple/string expectation error thrown
     msdata_errprop = msdata_errprop.reset_index([1,2])
     iondict['fc'] = msdata_errprop['FC']
@@ -249,17 +246,12 @@ def runttest(analysis_params, statstgrps, groupsets):
     msdata_teststats['T'] = tstat(msdata_teststats[('average', statstgrps[0])], msdata_teststats[('combASD', statstgrps[0])], msdata_teststats[('neff', statstgrps[0])], msdata_teststats[('average', statstgrps[1])], msdata_teststats[('combASD', statstgrps[1])], msdata_teststats[('neff', statstgrps[1])])
     msdata_teststats['deg'] = msdata_teststats[('neff', statstgrps[0])] + msdata_teststats[('neff', statstgrps[1])] - 2
     msdata_teststats['p'] = (1 - stats.t.cdf(msdata_teststats['T'], msdata_teststats['deg'])) * 2
-    msdata_teststats.loc[msdata_teststats['p'] <= minval, 'p'] = minval
+    msdata_teststats['p'][msdata_teststats['p'] <= minval] = minval
     msdata_teststats['logp'] = np.log10(msdata_teststats['p']) 
     
-    # Save msdata_teststats. Previously written to the current working
-    # directory as 'msdata_teststats_test.csv' (a debug-named file that
-    # littered code/ and was never read back); now written into the run's
-    # output directory under a descriptive name alongside the other outputs.
+    # Save msdata_teststats
     msdata_teststats = msdata_teststats.reset_index([1, 2])
-    msdata_teststats.to_csv(
-        analysis_params.outputdir / (analysis_params.filename.stem + '_teststats.csv'),
-        header=True, index=True)
+    msdata_teststats.to_csv('msdata_teststats_test.csv', header=True, index=True)
     
     # Update iondict with -logp
     iondict['-logp'] = -msdata_teststats['logp']
@@ -307,12 +299,7 @@ def runttest(analysis_params, statstgrps, groupsets):
     
     # Save results to CSV files
     iondict = iondict.set_index('Compound')
-    # Written into the run's output directory rather than the current working
-    # directory (was a bare 'qdata.csv' that landed in code/ and was never
-    # read back); the canonical -logq still goes into iondict.csv below.
-    iondict.to_csv(
-        analysis_params.outputdir / (analysis_params.filename.stem + '_qvalues.csv'),
-        index=True, header=True)
+    iondict.to_csv('qdata.csv', index=True, header=True)
     iondict2 = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
     iondict2['-logq'] = np.nan
     iondict2.loc[iondict.index.tolist(), '-logq'] = iondict['-logq']

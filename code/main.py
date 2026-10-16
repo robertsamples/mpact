@@ -1,29 +1,22 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
-Modifications Copyright 2026, Robert M. Samples
 """
 
 import re
 
 import sys
-import multiprocessing
-import numpy as np
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
 import time
 import string
 
+import platform
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QMainWindow, QSizeGrip
-from PyQt5.QtCore import QObject, Qt
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import QMainWindow, QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
+from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
+from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
 from pathlib import Path
-
-# Install/verify non-stock dependencies (epam.indigo, UpSetPlot, squarify)
-# before the modules that import them are loaded below.
-from importdependencies import ensure_dependencies
-ensure_dependencies()
 
 # GUI FILE
 from ui_main import Ui_MainWindow
@@ -35,21 +28,8 @@ from ui_functions import *
 import files
 
 from MSFaST import run_MSFaST, analysis_parameters
-from groupsets import GroupSetModel, build_query_dict
-from plotslots import PlotSlotRegistry
-from paramfields import save_checkbox_fields
-from csvcache import cached_read_csv, invalidate as invalidate_csv_cache
-from biogroups import compute_biological_groups
-from dbsearch import search_npatlas
-from searchtree import SearchTreePanel
-from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_ordination, prev_cv, plot_upset, plot_treemap
+from plotting import plot_abund, show_spectrum, show_featureplt, plot_heatmap, plot_mzrt, plot_samplecorr, kendrick, plot_volcano, plot_fc3d, plot_dendrogram, plot_PCA, prev_cv, gen_upsetplt, gen_treemap
 import getfragdb
-
-import webbrowser
-import npatlasupdate
-import mpactupdate
-import crashreport
-from dialogs import styled_message_box
 
 from indigo import Indigo
 from indigo.renderer import IndigoRenderer
@@ -77,35 +57,34 @@ Check if low_memory=False increases ram usage for average grps?
 -add bypass for plots based on checkmark. possibly use if check: ... else: button.hide() then pass
 
 - distribution of CVs on bottom of cvplt?
+- add pca option and allow visualization of key features on multivar plt?
 
 #TODO#
-- in source spectra viewer in spectrum details tab plot with preexisting in source fragment deconvolution algoirthm
-- clean up import sections and general code for better maintability and good syntax/standards
-    ~main.py's own import section done (dead PyQt5/stdlib/groupsets imports removed,
-    verified unused via pyflakes + grep, no behavior change); other files not yet swept
-- do overall data quality score, AUC on CV plot or something, may be present in a different form already
+#Easy/high priority
+- in source spectra
+- do overall data quality score, AUC
 - standardize method and class names
-- add terminal output with current line to status bar instead of just static status messages, perhaps with expand button to show full terminal output
-- potentially consider other database options like HMDB etc
-- fix up analysisinfo file output with better and more useful log ingo
-- add other ordination options like pca, pls-da, etc etc
-    ~DONE: the multivariate tab now offers PCA / NMDS / PLS-DA via a method
-    switcher (ordination.py, plotting.plot_ordination). Next candidate is
-    OPLS-DA (intentionally deferred -- no native sklearn support; see
-    devnotes.md "Multivariate ordination plot").
+- database management, options
+- fix up analysisinfo file output
+
+#Medium priority
+- mzmine msp file import
+- add other ordination options
 - add custom keyword arguments for each plot to make calling them easier
-- make it so groups can be reordered in the groupsets widgets?
-    ~model-layer support done: GroupSetModel.move() (groupsets.py), tested in
-    test_groupsets.py. UI drag-drop wiring (listWidget_pltgrps InternalMove +
-    syncing its rowsMoved signal to model.move()) not done -- needs a live
-    GUI session to verify the selection-tracking interacts correctly with
-    updatesets()'s existing blockSignals dance, which isn't something to
-    guess at unverified
-- consider if indexing and feature highly functions in plot options have any easy wins for optimization or disk use. (prob not)
+- add more conditionals so if one plot fails it doesn't kill everything else
+- add runcheck before searching when switching to search tab
+- Figure out way to have only active plot be updated and then to update others
+    when plot is switched
+- change treewidget in search tab to treeview for better search, add filter options
+- make it so groups can be reordered
+- make it so iondict and msdata are saved as a parent object so they dont need to
+    be reopened each time a heatmap feature is scrolled. This may actually not
+    be a good idea depending on ram demands
 - make goto buttons just one class and lambda an index for the stacked widgets
     when connecting!
 
-likely items that need more thought and planning
+#low priority/long term
+- Switch to MVC format for groupsets
 - maybe have a comparison mode for many different strains with and without elicitor
 - specificity/sensitivity plot
 - other statistical models
@@ -120,14 +99,17 @@ likely items that need more thought and planning
     generated each time if filtering is off but they are always true
 '''
 
-class query:
-    """Legacy groupset shape, kept only so old ``.mpct`` files (which pickle
-    this class by qualified name ``main.query``) can still be unpickled.
+class NumericalTreeWidgetItem(QtWidgets.QTreeWidgetItem):
+    def __lt__(self, other):
+        column = self.treeWidget().sortColumn() # the second column
+        try:
+            return float(self.text(column)) < float(other.text(column))
+        except ValueError: # fallback to alphabetical sorting if the text is not a number
+            return super().__lt__(other)
 
-    Live code uses ``groupsets.GroupSet``/``GroupSetModel`` instead; on load,
-    any ``query`` objects found in a save file are converted via
-    ``GroupSet.from_legacy`` (see ``MainWindow.read_save``). Do not use this
-    class for new code.
+class query:
+    """
+    Defines conditions (group presence/absence) to plot feature in a colour
     """
     def __init__(self):
         self.name = ''
@@ -135,35 +117,6 @@ class query:
         self.incl = ''  # and groups, feature must be in
         self.excl = ''  # not groups, feature must not be in
         self.colour = '#000000'
-
-
-class AnalysisWorker(QObject):
-    """Runs the heavy, Qt-free computation (``run_MSFaST``) on a worker thread.
-
-    Only the pure pandas/numpy/file-I/O step is moved off the GUI thread;
-    matplotlib/Qt plot generation must stay on the main thread and runs in
-    ``MainWindow._finish_analysis`` once ``finished`` is emitted.
-    """
-    finished = QtCore.pyqtSignal()
-    failed = QtCore.pyqtSignal(str)
-
-    def __init__(self, window):
-        QObject.__init__(self)
-        self.window = window
-
-    def run(self):
-        try:
-            result = run_MSFaST(self.window.analysis_paramsgui)
-            self.window.ionfilters = result.ionfilters
-            self.window.groupionlists = result.groupionlists
-            self.window.groupsets = result.groupsets
-            self.window.filtereddfs = result.filtereddfs
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            self.failed.emit('Processing failed (see console)')
-            return
-        self.finished.emit()
 
 
 fullruntime = 0
@@ -251,16 +204,8 @@ class MainWindow(QMainWindow):
         #self.show() # makes window reappear, acts like normal window now (on top now but can be underneath if you raise another window)
         
         self.ui.setupUi(self)
-        self.ui.label_credits.setText('v1.00.02 r26.06.30')
-
-        # "PCA" was a misnomer left over from when this checkbox/button only
-        # ran NMDS (see plotting.plot_ordination) -- the underlying
-        # checkBox_pca objectName/analysis_params.PCA attribute stay
-        # unchanged for .mpct save-file compatibility; only the visible text
-        # and tooltip change.
-        self.ui.checkBox_pca.setText('Multivariate')
-        self.ui.btn_pca.setToolTip('Multivariate Ordination (PCA/NMDS/PLS-DA)')
-
+        self.ui.label_credits.setText('v1.00 r24.11.17')
+                
         #initialize other dialog windows
         self.dialog = dialog()
         self.ftrdialog = ftrdialog()
@@ -272,7 +217,8 @@ class MainWindow(QMainWindow):
         self.pickedfeature = ''
         self.highlightcol = 'yellow'
         self.dbsearchdone = False
-        self.groupsetmodel = GroupSetModel()  # the groupset MVC model
+        self.selset = -1 #selected groupset index, refactor with MVC design
+        self.querys = [] #dictionary of the query/groupset objects
         self.groups = [] #biological groups in the dataset
         self.filename = Path.cwd()
         self.extractmetadatafilename = Path.cwd()
@@ -289,24 +235,16 @@ class MainWindow(QMainWindow):
         
 
         
-        # Per-plot widget/render state, one PlotSlot per plot name internally;
-        # these six attributes are dict-like views over that single registry
-        # (see plotslots.py) so existing self.fig['heatmap']-style call sites
-        # throughout plotting.py and main.py work unchanged.
-        self._plotslots = PlotSlotRegistry()
-        self.fig = self._plotslots.fig
-        self.canvas = self._plotslots.canvas
-        self.pltlayout = self._plotslots.pltlayout
-        self.toolbar = self._plotslots.toolbar
-        self.ax = self._plotslots.ax
-        self.highlight = self._plotslots.highlight
+        #initialize figure element dictionaries, can call with self.currplot as key
+        self.fig = {}
+        self.canvas = {}
+        self.pltlayout = {}
+        self.toolbar = {}
+        self.ax = {}
+        self.highlight = {}
                 
         self.ui.btn_run.clicked.connect(self.run_analysis)
-        # Replaces the Designer-created QTreeWidget with a real QTreeView +
-        # per-column filter bar (searchtree.py) -- doesn't edit ui_main.py,
-        # see SearchTreePanel's docstring for how the runtime swap works.
-        self.searchtree = SearchTreePanel(self.ui.treeWidget)
-        self.searchtree.view.selectionModel().selectionChanged.connect(self.on_tree_item_selection_changed)
+        self.ui.treeWidget.itemSelectionChanged.connect(self.on_tree_item_selection_changed)
 
 
         def moveWindow(event):
@@ -321,12 +259,6 @@ class MainWindow(QMainWindow):
         self.ui.label_title_bar_top.mouseMoveEvent = moveWindow
         UIFunctions.uiDefinitions(self)
         self.show()
-
-        # Deferred (post-show) best-effort startup checks: prompt to refresh a
-        # stale NPAtlas database and to install a newer MPACT release. Run via
-        # singleShot so the window paints first; fully guarded so they can
-        # never block or break launch. GUI-only path -- verify by launching.
-        QtCore.QTimer.singleShot(0, self._run_startup_checks)
 
 
     #---Methods---
@@ -551,104 +483,33 @@ class MainWindow(QMainWindow):
     def error(self, message):
         self.ui.label_status.setText(message)
         self.ui.label_status.setStyleSheet('color: rgb(150,0,0);')
-
-    # ---- Startup checks (atlas freshness + app self-update) ----
-    # All best-effort and fully guarded: any failure is logged to the console
-    # and otherwise ignored so a check can never block or break launch. The
-    # Qt-free logic lives in npatlasupdate.py / mpactupdate.py (unit-tested);
-    # these methods are only the dialog/wiring layer and need a live launch to
-    # verify end to end.
-    def _run_startup_checks(self):
-        try:
-            self._check_atlas_freshness()
-        except Exception as exc:
-            print('Atlas update check skipped:', exc)
-        try:
-            self._check_app_update()
-        except Exception as exc:
-            print('App update check skipped:', exc)
-
-    def _check_atlas_freshness(self, atlas_path='npatlas.tsv', max_age_days=30):
-        """Offer to re-download the Natural Products Atlas if the local copy is
-        missing or older than ``max_age_days``."""
-        if not npatlasupdate.is_update_due(atlas_path, max_age_days=max_age_days):
-            return
-        age = npatlasupdate.atlas_age_days(atlas_path)
-        age_msg = 'missing' if age is None else ('about %d days old' % int(age))
-        reply = styled_message_box(
-            self, QtWidgets.QMessageBox.Question, 'Update Natural Products Atlas?',
-            'Your local Natural Products Atlas database is %s.\n\n'
-            'Download the latest copy from npatlas.org now (about 30 MB)?' % age_msg,
-            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            default=QtWidgets.QMessageBox.No)
-        if reply != QtWidgets.QMessageBox.Yes:
-            return
-        # The download is large and runs on the main thread (wait cursor); a
-        # failed/partial transfer never clobbers the existing atlas (atomic
-        # replace in npatlasupdate.download_atlas). Threading this is a future
-        # improvement -- see devnotes.md.
-        self.ui.label_status.setText('Downloading Natural Products Atlas...')
-        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
-        QtWidgets.QApplication.processEvents()
-        try:
-            n = npatlasupdate.download_atlas(atlas_path)
-            self.ui.label_status.setText('Natural Products Atlas updated (%.1f MB).' % (n / 1e6))
-        except Exception as exc:
-            self.error('Atlas update failed (kept existing copy): ' + str(exc))
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
-
-    def _check_app_update(self):
-        """Check GitHub for a newer MPACT release; offer a git-pull update."""
-        info = mpactupdate.check_for_update(timeout=5)
-        if not info.available:
-            return
-        notes = (info.notes or '').strip()
-        if len(notes) > 800:
-            notes = notes[:800] + '...'
-        reply = styled_message_box(
-            self, QtWidgets.QMessageBox.Question, 'MPACT update available',
-            'A newer MPACT release is available.\n\n'
-            'Installed: %s\nLatest: %s\n\n%s\n\n'
-            'Update now (git pull)?' % (info.current, info.latest, notes),
-            buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            default=QtWidgets.QMessageBox.No)
-        if reply != QtWidgets.QMessageBox.Yes:
-            return
-        repo_dir = Path(__file__).resolve().parent.parent
-        ok, output = mpactupdate.apply_git_update(repo_dir)
-        if ok:
-            styled_message_box(
-                self, QtWidgets.QMessageBox.Information, 'Update complete',
-                'MPACT was updated. Please restart the application.\n\n' + output)
-        else:
-            self.error('Automatic update failed; opening the release page instead.')
-            if info.url:
-                webbrowser.open(info.url)
-
+    
     def getgroups(self):
         """
         Get biological groups on input of all input files, fills comboboxes with these.
         """
+        extractmetadata = pd.read_csv(self.extractmetadatafilename, sep=',', header=[0], index_col=None)
+        samplelist = pd.read_csv(self.samplelistfilename, sep=',', header=[0], index_col=None)
+    
         try:
-            groups, unresolved = compute_biological_groups(
-                self.extractmetadatafilename, self.samplelistfilename, self.filename)
-        except ValueError as exc:
-            self.error(str(exc))
+            combinedmetadata = extractmetadata.set_index('Sample_Code').join(samplelist.set_index('Sample_Code')) \
+                                                    .reset_index().set_index('Injection')
+        except Exception:
+            self.error('Data read failure: Check input files')
             return
-
-        if unresolved:
-            # Report once, not once per row -- a dataset with many injections
-            # missing from the metadata join would otherwise spam the console
-            # with no visible indication anything is wrong, and self.groups
-            # would silently end up incomplete with no signal to the combo
-            # boxes/groupset editor that consume it.
-            unique_unresolved = sorted(set(map(str, unresolved)))
-            print(f"getgroups: {len(unique_unresolved)} injection(s) had no "
-                  f"matching Biological_Group and were skipped: {unique_unresolved}")
-            self.error(f"{len(unique_unresolved)} injection(s) missing from "
-                       "metadata -- biological group list may be incomplete.")
-
+    
+        msdata = pd.read_csv(self.filename, sep=',', header=None, index_col=[0, 1, 2])
+        groups = []
+    
+        for elem in msdata.iloc[2]:
+            biolgroup = combinedmetadata.loc[elem, 'Biological_Group']
+            try:
+                if biolgroup not in groups:
+                    groups.append(combinedmetadata.loc[elem, 'Biological_Group'])
+            except Exception:
+                print(biolgroup)
+                print("")
+                print(groups)
         self.groups = groups
     
         # Set experimental and control grp defaults in ui
@@ -683,42 +544,88 @@ class MainWindow(QMainWindow):
         Run a full compound database search. Filter the database matches within a specified mass window.
         Concatenate the hits and sort them by parts-per-million (ppm).
         """
-        self.hitdb, _ = search_npatlas(
-            self.analysis_paramsgui.outputdir,
-            self.analysis_paramsgui.filename.stem,
-            self.atlas,
-            self.analysis_paramsgui.ppmthresh,
-        )
+        self.hitdb = {}
+        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+        iondict['hits'] = ''
+        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=None).iloc[:, :3]
+    
+        for _, mrow in msdata.iterrows():
+            # Iterates over iondict, filters DB matches within window.
+            # Repeats for adducts, uses length of concat DF for feature hits
+            mass = mrow['m/z']
+            ppmwindow = self.analysis_paramsgui.ppmthresh
+            hits_h = self.atlas[abs(1000000 * (self.atlas['compound_m_plus_h'] - mass) / self.atlas['compound_m_plus_h']) < ppmwindow]
+            hits_h['ppm'] = abs(1000000 * (hits_h['compound_m_plus_h'] - mass) / hits_h['compound_m_plus_h'])
+            hits_na = self.atlas[abs(1000000 * (self.atlas['compound_m_plus_na'] - mass) / self.atlas['compound_m_plus_na']) < ppmwindow]
+            hits_na['ppm'] = abs(1000000 * (hits_na['compound_m_plus_na'] - mass) / hits_na['compound_m_plus_na'])
+            hits = pd.concat([hits_h, hits_na])
+            hits = hits.sort_values(by=['ppm'])
+            self.hitdb[mrow['Compound']] = hits
+            iondict.loc[mrow['Compound'], 'hits'] = hits.shape[0]
+    
+        iondict.to_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', header=True, index=True)
 
         
 
 
     def fillfttree(self):
         # Fill feature tree with database hits
-        iondict = cached_read_csv(
+        iondict = pd.read_csv(
             self.analysis_paramsgui.outputdir / 'iondict.csv',
             sep=',',
             header=[0],
             index_col=None
         )
         iondict = iondict[iondict['hits'] >= 0]
+        self.ui.treeWidget.setSortingEnabled(True)
 
-        # Rows in searchtree.COLUMNS order (Compound, m/z, TR, Max, Sets,
-        # Groups, FC, Hits) -- raw values, not pre-formatted strings; the
-        # model formats numeric columns for display and keeps the raw value
-        # available for proper numeric sort/filter (see IonTableModel).
-        rows = [
-            (row['Compound'], row['m/z'], row['Retention time (min)'], row['max'],
-             row['groups'], row['groups'], row['fc'], row['hits'])
-            for _, row in iondict.iterrows()
-        ]
-        self.searchtree.set_rows(rows)
+        itemdict = {}
+        self.ui.treeWidget.clear()
+        for i, row in iondict.iterrows():
+            item = NumericalTreeWidgetItem([
+                row['Compound'],
+                str(round(row['m/z'], 4)),
+                str(round(row['Retention time (min)'], 3)),
+                str(int(row['max'])),
+                str(row['groups']),
+                str(row['groups']),
+                str(round(row['fc'], 2)),
+                str(int(row['hits']))
+            ])
+            itemdict[i] = item
+            self.ui.treeWidget.addTopLevelItem(item)
+        # Optionally expand all items
+        # self.ui.treeWidget.expandAll()
 
 
-
+    
+    def onItemClicked():
+        if len(self.ftrdialog.ui.treeWidget.selectedItems()) > 0:
+            item = self.ftrdialog.ui.treeWidget.selectedItems()[0]
+            smiles = item.text(5)
+            if smiles:
+                try:
+                    m = indigo.loadMolecule(smiles)
+                    indigo.setOption('render-image-size', '400,400')
+                    image_path = f'compoundimages/{item.text(0)}.png'
+                    renderer.renderToFile(m, image_path)
+                    pixmap = QPixmap(image_path)
+                    pixmap2 = pixmap.scaled(400, 400, QtCore.Qt.KeepAspectRatio)
+                    self.ftrdialog.ui.label.setPixmap(pixmap2)
+                except Exception as e:
+                    print(f"Error rendering molecule for {item.text(0)}: {e}")
+                    # Optionally, display a default image or message
+            else:
+                print(f"No SMILES string available for {item.text(0)}")
+                # Handle the case where SMILES is empty
+            
     def on_tree_item_selection_changed(self):
-        name = self.searchtree.selected_compound()
-        if name:
+        selected_items = self.ui.treeWidget.selectedItems()
+        if selected_items:
+            item = selected_items[0]
+            # Get the name from the first column
+            name = item.text(0)
+            #print(f"Selection changed: {name}")
             # Call the method to highlight the feature
             self.highlight_feature(name)
 
@@ -787,20 +694,11 @@ class MainWindow(QMainWindow):
                     
     def highlight_feature(self, newfeature):
         """
-        Select (or, if the same feature is clicked twice, deselect) a feature
-        and highlight it across all plots.
-
-        This is the entry point for actual selection events (clicking a plot
-        point, a tree row, or arrow-key heatmap navigation) -- it is where the
-        "click the same feature twice to clear it" toggle belongs. To simply
-        refresh the displays for the *currently* selected feature (e.g. when
-        switching tabs in the feature-info dialog) call ``_refresh_highlight``
-        instead; calling this method with ``newfeature == self.pickedfeature``
-        would incorrectly toggle the highlight off.
-
+        Highlights the selected feature in all plots.
+    
         Args:
             newfeature (str): The name of the new feature to highlight.
-
+        
         Returns:
             None.
         """
@@ -809,50 +707,33 @@ class MainWindow(QMainWindow):
             self.highlightcol = (0, 0, 0, 0)
         else:
             self.highlightcol = 'yellow'
-
-        self.pickedfeature = newfeature
-        self._refresh_highlight()
-
-    def _refresh_highlight(self):
-        """Redraw every plot/dialog for the current ``self.pickedfeature`` and
-        ``self.highlightcol`` without changing selection state.
-
-        Safe to call repeatedly (e.g. on every feature-info tab switch) since,
-        unlike ``highlight_feature``, it never toggles ``highlightcol``. Also
-        guards against the feature-info plot objects (``abundplt``/``spec``)
-        not existing yet, and against the current feature not being present in
-        the loaded fragmentation database.
-        """
+            
+        # Highlight the selected feature in all plots
         for plot in self.highlight:
             self.highlight[plot].set_color(self.highlightcol)
-
-        if not self.pickedfeature:
-            return
-
+            
+        # Set the selected feature as the picked feature
+        self.pickedfeature = newfeature
+        
         # Read iondict file to get ion data
-        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv',
+        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv',
                               sep=',', header=[0], index_col=[0])
-
+        
         # Update volcano plot with the selected feature
         if self.analysis_paramsgui.Volcanoplt:
-            # 'logfc' is never persisted to iondict.csv -- plot_volcano
-            # computes it in-memory from 'fc' (np.log2(iondict['fc'])) each
-            # time it draws, rather than writing it back to disk. Derive it
-            # the same way here instead of indexing a column that doesn't
-            # exist in the file.
             self.highlight['volcano'].set_data(
-                [np.log2(iondict.loc[self.pickedfeature, 'fc'])],
+                [iondict.loc[self.pickedfeature, 'logfc']],
                 [iondict.loc[self.pickedfeature, '-logq']]
             )
             self.canvas['volcano'].draw_idle()
-
+                
             # Update MZRT plot with the selected feature
             self.highlight['mzrt'].set_data(
                 [iondict.loc[self.pickedfeature, 'Retention time (min)']],
                 [iondict.loc[self.pickedfeature, 'm/z']]
             )
             self.canvas['mzrt'].draw_idle()
-
+        
         # Update KMD plot with the selected feature
         if self.analysis_paramsgui.KMD:
             self.highlight['kmd'].set_data(
@@ -860,26 +741,19 @@ class MainWindow(QMainWindow):
                 [iondict.loc[self.pickedfeature, 'kmd']]
             )
             self.canvas['kmd'].draw_idle()
-
-        # Update the multivariate plot's loadings-view highlight (a separate
-        # concept from its scores view, which highlights a clicked *sample*
-        # via parent.pickedsample, not a feature -- so this only applies
-        # when self.pca exists and is currently showing loadings).
-        if getattr(self, 'pca', None) is not None:
-            self.pca.highlight_loading(self.pickedfeature, self.highlightcol)
-
+        
         # Update feature plot with the selected feature
         self.highlight['featureplt'].set_data(
             [iondict.loc[self.pickedfeature, 'Retention time (min)']],
             [iondict.loc[self.pickedfeature, 'm/z']]
         )
         self.canvas['featureplt'].draw_idle()
-
+        
         msdata = pd.read_csv(
             self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'),
             sep=',', header=[2], index_col=[0]
         )
-
+        
         # Set heatmap highlight based on view
         self.heatind = self.cmind.index(msdata.index.to_list().index(self.pickedfeature))
         xlim = int(self.canvas['heatmap'].figure.axes[2].get_xlim()[1])
@@ -888,23 +762,16 @@ class MainWindow(QMainWindow):
             [self.heatind, self.heatind, self.heatind+1, self.heatind+1, self.heatind]
         )
         self.canvas['heatmap'].draw_idle()
-
+        
         # Run search when feature is selected
         if self.ftrdialog.ui.stackedWidget.currentIndex() == 0 and not self.ftrdialog.isHidden():
             self.runsearch(iondict.loc[self.pickedfeature, 'm/z'])
-
-        # Reset spec if a fragmentation database with this feature is loaded.
-        # spec may not exist yet (e.g. a prior dataset had no frag file) and
-        # the feature may not be present in a newly-loaded fragdb, so both are
-        # guarded rather than assumed.
-        fragdb = getattr(self, 'fragdb', 'None')
-        if self.fragfilename != '' and getattr(self, 'spec', None) is not None \
-                and fragdb != 'None' and self.pickedfeature in getattr(fragdb, 'ions', {}):
-            self.safe_generate('spectrum plot', self.spec.reset, fragdb.ions[self.pickedfeature].pattern)
-
-        if self.ftrdialog.ui.stackedWidget.currentIndex() == 2 and not self.ftrdialog.isHidden() \
-                and getattr(self, 'abundplt', None) is not None:
-            self.safe_generate('abundance plot', self.abundplt.reset)
+        
+        # Reset spec if fragfilename exists and update abundplt
+        if self.fragfilename != '':
+            self.spec.reset(self.fragdb.ions[self.pickedfeature].pattern)
+        if self.ftrdialog.ui.stackedWidget.currentIndex() == 2 and not self.ftrdialog.isHidden():
+            self.abundplt.reset()
 
 
      # Move heatmap selection up or down with W/S key press
@@ -926,23 +793,10 @@ class MainWindow(QMainWindow):
         """
         if self.ui.stackedWidget_plot.currentIndex() != 8 or self.ui.stackedWidget.currentIndex() != 3:
             return
-
-        cmind = getattr(self, 'cmind', None)
-        heatind = getattr(self, 'heatind', None)
-        if not cmind or heatind is None:
-            return
-
-        # Clamp rather than wrap/raise: Python's negative indexing would
-        # silently jump to the opposite end of the list on underflow, and an
-        # unclamped index overflows with IndexError on the last row -- both
-        # triggerable just by holding W/S past either end of the heatmap.
-        new_heatind = max(0, min(len(cmind) - 1, heatind + shift))
-        if new_heatind == heatind:
-            return
-
-        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
-        msdata = cached_read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0]).iloc[:, 2:]
-        index = cmind[new_heatind]
+    
+        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=[0])
+        msdata = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[2], index_col=[0]).iloc[:, 2:]
+        index = self.cmind[self.heatind + shift]
         name = msdata.index.tolist()[index]
     
         self.ui.lbl_featurename.setText('Compound: ' + name)
@@ -957,17 +811,12 @@ class MainWindow(QMainWindow):
         Args:
             savefile (Path): The path to the saved session file.
         """
-        # Loading a session may point at an entirely different dataset's
-        # output directory -- drop any cached reads from whatever was
-        # previously loaded/analysed.
-        invalidate_csv_cache()
-
         print("read1")
         with open(savefile, 'rb') as read_pi:
             print("read3")
             self.savedata = pickle.load(read_pi)
             print("read2")
-
+    
         # Assign the analysis parameters
         self.analysis_paramsgui = self.savedata['parameters']
             
@@ -997,286 +846,96 @@ class MainWindow(QMainWindow):
         
         self.filename = self.analysis_paramsgui.outputdir / self.analysis_paramsgui.filename.stem / 'rawdata' / self.analysis_paramsgui.filename.name
     
-        # Get groups and load groupsets (accepts both old pickled `query`
-        # objects and current `GroupSet` objects -- see GroupSet.from_legacy).
+        # Get groups and update querys
         self.getgroups()
-        self.groupsetmodel = GroupSetModel.from_legacy_list(self.analysis_paramsgui.queries)
+        self.querys = self.analysis_paramsgui.queries
         UIFunctions.updatesets(self)
         
         
     def write_save(self):
-        """Write the current analysis session to a ``.mpct`` (pickle) file.
-
-        Each component is captured defensively, so that one unreadable input
-        (e.g. a file held open by another program) does not abort the whole
-        save. The pickle is written to a temporary file that atomically
-        replaces the target, so an interrupted save cannot corrupt an existing
-        ``.mpct``.
+        """Writes the current analysis session to a pickle file.
         """
-        params = self.analysis_paramsgui
-        params.queries = self.groupsetmodel.to_legacy_list()  # plain GroupSet list
-
-        def _capture(label, reader, default=None):
-            try:
-                return reader()
-            except Exception:
-                import traceback
-                print('Warning: could not capture ' + label + ' for save:')
-                traceback.print_exc()
-                return default
-
-        savedata = dict(self.savedata)
-        savedata['parameters'] = params
-        savedata['peaktable'] = _capture(
-            'peak table',
-            lambda: pd.read_csv(params.outputdir / params.filename.name, sep=',', header=None, index_col=None, low_memory=False))
-        savedata['samplelist'] = _capture(
-            'sample list',
-            lambda: pd.read_csv(self.samplelistfilename, sep=',', header=None, index_col=None))
-        savedata['extractmetadata'] = _capture(
-            'extract metadata',
-            lambda: pd.read_csv(self.extractmetadatafilename, sep=',', header=None, index_col=None))
-        if params.fragfilename != '':
-            savedata['fragdb'] = _capture(
-                'fragment database',
-                lambda: Path(params.fragfilename).read_text(), default='None')
+        self.analysis_paramsgui.queries = self.querys # WRITES QUERY DB FOR GROUPSETS IN ANALYSISPARAMETERS, WILL NEED TO CHANGE WHEN MVC IMPLEMENTED
+        file_pi = open(self.analysis_paramsgui.outputdir/(self.analysis_paramsgui.filename.stem + '.mpct'), 'wb')
+        self.savedata['parameters'] = self.analysis_paramsgui
+        self.savedata['peaktable'] = pd.read_csv(self.analysis_paramsgui.outputdir / self.analysis_paramsgui.filename.name, sep = ',', header = None, index_col = None)
+        self.savedata['samplelist'] = pd.read_csv(self.samplelistfilename, sep = ',', header = None, index_col = None)
+        self.savedata['extractmetadata'] = pd.read_csv(self.extractmetadatafilename , sep = ',', header = None, index_col = None)
+        if self.analysis_paramsgui.fragfilename != '':
+            fragmsp = open(self.analysis_paramsgui.fragfilename, 'r')     
+            self.savedata['fragdb'] = fragmsp.read()
+            fragmsp.close()
         else:
-            savedata['fragdb'] = 'None'
-        self.savedata = savedata
-
-        target = params.outputdir / (params.filename.stem + '.mpct')
-        tmp = target.with_name(target.name + '.tmp')
-        try:
-            with open(tmp, 'wb') as file_pi:
-                pickle.dump(savedata, file_pi)
-            os.replace(tmp, target)  # atomic replace on the same filesystem
-        except Exception:
-            import traceback
-            print('Error saving .mpct file:')
-            traceback.print_exc()
-            self.error('Analysis complete but save failed (see console)')
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except Exception:
-                pass
+            self.savedata['fragdb'] = 'None'
+        pickle.dump(self.savedata, file_pi)
+        file_pi.close()
     
-    def export_filtered_outputs(self):
-        """Write post-filter exports next to the analysis output (best-effort).
-
-        - The filtered peak table in its source layout (a row subset of the
-          input file; matched by compound id, falling back to m/z + RT).
-        - If a fragmentation file is loaded, an MSP/MGF re-indexed so its entry
-          IDs match the filtered peak-table row order -- the form GNPS2 expects.
-
-        Failures are logged and never abort the analysis.
-        """
-        import translators
-        params = self.analysis_paramsgui
-        filtered_internal = params.outputdir / (params.filename.stem + '_filtered.csv')
-
-        try:
-            source = Path(params.filename)
-            out = params.outputdir / (params.filename.stem + '_filtered_source' + source.suffix)
-            count = translators.filter_source_peaktable(source, filtered_internal, out)
-            print('Wrote filtered source peak table (' + str(count) + ' features): ' + str(out))
-        except Exception:
-            import traceback
-            print('Could not export filtered source peak table:')
-            traceback.print_exc()
-
-        fragfile = getattr(params, 'fragfilename', '')
-        if fragfile:
-            try:
-                fragpath = Path(fragfile)
-                out = params.outputdir / (fragpath.stem + '_reindexed' + fragpath.suffix)
-                count = translators.reindex_fragments(filtered_internal, fragpath, out)
-                print('Wrote GNPS2 re-indexed fragments (' + str(count) + ' entries): ' + str(out))
-            except Exception:
-                import traceback
-                print('Could not re-index fragmentation file:')
-                traceback.print_exc()
-
-    def safe_generate(self, label, func, *args, **kwargs):
-        """Run a plot/generation step so a single failure is non-fatal.
-
-        Logs the traceback and notes the failure in the status bar, then
-        returns None so the remaining plots are still generated.
-        """
-        try:
-            return func(*args, **kwargs)
-        except Exception:
-            import traceback
-            print('Error generating ' + label + ':')
-            traceback.print_exc()
-            self.ui.label_status.setText('Warning: ' + label + ' failed (see console)')
-            return None
-
-    def _create_or_reset(self, attr, label, create_call, reset_call=None):
-        """Create a plot object the first time it's needed, or reset() it if
-        it already exists.
-
-        Plot (re)generation used to be gated entirely on ``self.analysisrun``
-        (a whole-session "has any analysis completed" flag): the very first
-        analysis created every enabled plot, and every later run/regenerate
-        only ever called ``.reset()`` on them. That breaks as soon as an
-        optional output toggles between runs in the same session -- e.g. the
-        first dataset has no fragmentation file (so ``self.spec`` is never
-        created) and a later dataset does: ``self.spec.reset(...)`` would then
-        raise ``AttributeError`` because the object was never created. Keying
-        the create-vs-reset decision off whether the attribute already exists
-        (rather than off analysisrun) fixes this for every optional plot.
-        """
-        if getattr(self, attr, None) is None:
-            result = self.safe_generate(label, create_call)
-            if result is not None:
-                setattr(self, attr, result)
-        elif reset_call is not None:
-            self.safe_generate(label, reset_call)
-
-    def _generate_plots(self):
-        """Create or refresh every plot for the current analysis parameters.
-
-        Shared by the post-compute step (``_finish_analysis``, after a fresh
-        ``run_MSFaST``) and the dialog's "Apply" button (``regenerateplts``),
-        so both paths get the same create-if-missing safety net.
-        """
-        params = self.analysis_paramsgui
-        pltfile = params.outputdir / (params.filename.stem + '_filtered.csv')
-        iondictfile = params.outputdir / 'iondict.csv'
-        dfs = self.filtereddfs
-        grpsts = self.groupsets
-
-        self._create_or_reset('treemap', 'treemap',
-            lambda: plot_treemap(self, 'treemap', self.ui.frame_treemap, pltfile, '', ''),
-            lambda: self.treemap.reset(pltfile, '', ''))
-        stop_functime('treemap complete')
-
-        if params.CVfil:
-            self._create_or_reset('prevcv', 'CV plot',
-                lambda: prev_cv(self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none'),
-                lambda: self.prevcv.reset(self, '', ''))
-            stop_functime('cvplt complete')
-
-        self._create_or_reset('ftplt', 'feature plot',
-            lambda: show_featureplt(self, 'featureplt', self.ui.frame_featureplt, iondictfile, '', ''),
-            lambda: self.ftplt.reset(iondictfile, '', ''))
-        stop_functime('ftplt complete')
-
-        self._create_or_reset('dend', 'dendrogram',
-            lambda: plot_dendrogram(self, 'dend', self.ui.frame_dend, pltfile, '', ''),
-            lambda: self.dend.reset(pltfile, '', ''))
-        stop_functime('dendrogram complete')
-
-        if params.PCA:
-            self._create_or_reset('pca', 'multivariate ordination plot',
-                lambda: plot_ordination(self, 'pca', self.ui.frame_pca, pltfile, '', ''),
-                lambda: self.pca.reset(pltfile, '', ''))
-            stop_functime('ordination complete')
-
-        if params.FC3Dplt:
-            self._create_or_reset('fc3d', '3D fold-change plot',
-                lambda: plot_fc3d(self, 'fc3d', self.ui.frame_fc3d, iondictfile, dfs, grpsts),
-                lambda: self.fc3d.reset(iondictfile, dfs, grpsts))
-            stop_functime('fc3d complete')
-
-        if params.KMD:
-            self._create_or_reset('kmd', 'Kendrick mass defect plot',
-                lambda: kendrick(self, 'kmd', self.ui.frame_kmd, iondictfile, dfs, grpsts),
-                lambda: self.kmd.reset(iondictfile, dfs, grpsts))
-            stop_functime('kmd complete')
-
-        if params.MZRTplt:
-            self._create_or_reset('mzrt', 'm/z vs RT plot',
-                lambda: plot_mzrt(self, 'mzrt', self.ui.frame_mzrt, iondictfile, dfs, grpsts),
-                lambda: self.mzrt.reset(iondictfile, dfs, grpsts))
-            stop_functime('mzrt complete')
-
-        if params.Volcanoplt:
-            self._create_or_reset('volcano', 'volcano plot',
-                lambda: plot_volcano(self, 'volcano', self.ui.frame_volcano, iondictfile, dfs, grpsts),
-                lambda: self.volcano.reset(iondictfile, dfs, grpsts))
-            stop_functime('volcano complete')
-
-        self._create_or_reset('heatmap', 'heatmap',
-            lambda: plot_heatmap(self, 'heatmap', self.ui.frame_heatmap, pltfile),
-            lambda: self.heatmap.reset(self, 'heatmap', self.ui.frame_heatmap, pltfile))
-        stop_functime('heatmap complete')
-
-        # abundplt/spec are only ever (re)drawn for the currently picked
-        # feature via _refresh_highlight, not here -- just make sure they
-        # exist when needed.
-        self._create_or_reset('abundplt', 'abundance plot', lambda: plot_abund(self, 'abund'))
-        if self.fragfilename != '':
-            self._create_or_reset('spec', 'spectrum plot', lambda: show_spectrum(self, 'spec'))
-
-        self._create_or_reset('samplecorr', 'sample correlation plot',
-            lambda: plot_samplecorr(self, 'samplecorr', self.ui.frame_samplecorr, iondictfile, dfs, grpsts),
-            lambda: self.samplecorr.reset(iondictfile, dfs, grpsts))
-        stop_functime('samplecorr complete')
-
-        self._create_or_reset('upset', 'upset plot',
-            lambda: plot_upset(self, 'upset', self.ui.frame_upset, iondictfile, '', ''),
-            lambda: self.upset.reset(iondictfile, '', ''))
-        stop_functime('upsetplt complete')
-
     def run_analysis(self):
-        # Ignore re-clicks while an analysis is already running on the worker thread.
-        if getattr(self, '_analysis_thread', None) is not None and self._analysis_thread.isRunning():
-            return
         self.dbsearchdone = False
-        # iondict.csv/_filtered.csv/_summarydata.csv from any previous run
-        # are about to be superseded -- drop cached reads of them so feature
-        # selection etc. doesn't serve stale data from before this run.
-        invalidate_csv_cache()
         start_functime()
         self.enumerate_inputs()
         print('')
         stop_functime('inputs obtained')
         
-        # Heavy, Qt-free computation runs on a worker thread so the GUI stays
-        # responsive; plotting resumes on the main thread in _finish_analysis
-        # once the worker emits 'finished'.
-        self.ui.btn_run.setEnabled(False)
-        self.ui.label_status.setText('Processing data...')
-        self.ui.label_status.setStyleSheet('color: rgb(150,150,150);')
-
-        self._analysis_thread = QtCore.QThread()
-        self._analysis_worker = AnalysisWorker(self)
-        self._analysis_worker.moveToThread(self._analysis_thread)
-        self._analysis_thread.started.connect(self._analysis_worker.run)
-        self._analysis_worker.finished.connect(self._on_compute_finished)
-        self._analysis_worker.failed.connect(self._on_compute_failed)
-        self._analysis_worker.finished.connect(self._analysis_thread.quit)
-        self._analysis_worker.failed.connect(self._analysis_thread.quit)
-        # The thread/worker are kept as attributes (replaced on the next run)
-        # rather than deleteLater'd, so the re-entrancy guard can safely call
-        # isRunning() afterwards without touching a deleted C++ object.
-        self._analysis_thread.start()
-
-    def _on_compute_failed(self, msg):
-        stop_functime('calculations failed')
-        self.error(msg)
-        self.ui.btn_run.setEnabled(True)
-
-    def _on_compute_finished(self):
+        # Insert working signal here, will likely need multithreading
+        run_MSFaST(self)
         print('')
         stop_functime('calculations complete')
+        
         try:
-            self._finish_analysis()
+            gen_treemap(self)  # move back to end
         except Exception:
-            import traceback
-            traceback.print_exc()
-            self.error('Error during plot generation (see console)')
-        finally:
-            self.ui.btn_run.setEnabled(True)
-
-    def _finish_analysis(self):
+            print("not generating tremap due to an error")
+        stop_functime('treemap complete')
+        
         # Used for point opacity based on abundance colouring
-        iondict = cached_read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
+        iondict = pd.read_csv(self.analysis_paramsgui.outputdir / 'iondict.csv', sep=',', header=[0], index_col=None)
         self.analysis_paramsgui.maxval = iondict['logmax'].max()
-
-        self._generate_plots()
+        
+        if self.analysisrun:
+            self.regenerateplts()
+        else:
+            self.ftplt = show_featureplt(self, 'featureplt', self.ui.frame_featureplt, self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
+            stop_functime('ftplt complete')
+        
+            self.dend = plot_dendrogram(self, 'dend', self.ui.frame_dend, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
+            stop_functime('dendrogram complete')
+        
+            if self.analysis_paramsgui.PCA:
+                self.pca = plot_PCA(self, 'pca', self.ui.frame_pca, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), '', '')
+                stop_functime('nmds complete')
+        
+            if self.analysis_paramsgui.FC3Dplt:
+                self.fc3d = plot_fc3d(self, 'fc3d', self.ui.frame_fc3d,  self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets) 
+                stop_functime('fc3d complete')
+        
+            if self.analysis_paramsgui.KMD:
+                self.kmd = kendrick(self, 'kmd', self.ui.frame_kmd, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+                stop_functime('kmd complete')
+        
+            if self.analysis_paramsgui.MZRTplt:
+                self.mzrt = plot_mzrt(self, 'mzrt', self.ui.frame_mzrt, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+                stop_functime('mzrt complete')
+        
+            if self.analysis_paramsgui.Volcanoplt:
+                self.volcano = plot_volcano(self, 'volcano', self.ui.frame_volcano, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+                stop_functime('volcano complete')
+        
+            self.heatmap = plot_heatmap(self,  'heatmap', self.ui.frame_heatmap, self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'))
+            stop_functime('heatmap complete')
+        
+            self.abundplt = plot_abund(self, 'abund')
+        
+            if self.fragfilename != '':
+                self.spec = show_spectrum(self, 'spec')
+        
+            if self.analysis_paramsgui.CVfil:
+                self.prevcv = prev_cv(self, 'cvplt', self.ui.frame_cvplt, 'none', 'none', 'none')
+                stop_functime('cvplt complete')
+        
+            self.samplecorr = plot_samplecorr(self, 'samplecorr', self.ui.frame_samplecorr, self.analysis_paramsgui.outputdir / 'iondict.csv', self.filtereddfs, self.groupsets)
+            stop_functime('samplecorr complete')
+        
         self.analysisrun = True
         
         #text = open(self.analysis_paramsgui.outputdir / 'analysisinfo.txt').read() #writes output text to report tab
@@ -1287,7 +946,7 @@ class MainWindow(QMainWindow):
         # Writes filtering statistics in data review summary
         msdata_unformatted = pd.read_csv(self.analysis_paramsgui.filename, sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
         msdata_formatted = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_formatted.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
-        msdata_filtered = cached_read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+        msdata_filtered = pd.read_csv(self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv'), sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
         #test = open('testionfilters.pkl', 'wb') # this exports ionfilters as a pickle for debuging
         #pickle.dump(self.ionfilters, test)
         
@@ -1319,6 +978,11 @@ class MainWindow(QMainWindow):
             self.fillfttree()
             self.dbsearchdone = True
         
+        try:
+            gen_upsetplt(self)
+        except Exception:
+            print("not generating upset plot due to an error")
+        stop_functime('upsetplt complete')
         self.ui.label_status.setText('Analysis Complete')
         stop_functime('analysis complete')
         print('')
@@ -1326,10 +990,9 @@ class MainWindow(QMainWindow):
         print('')
         print('')
         reset_runtime()
-
-
+        
+        
         self.write_save()
-        self.export_filtered_outputs()
         
     def enumerate_inputs(self):
         self.analysis_paramsgui = analysis_parameters()
@@ -1339,20 +1002,19 @@ class MainWindow(QMainWindow):
             self.analysis_paramsgui.blnkgrp = ''
         self.analysis_paramsgui.blnkfltr = self.ui.checkBox_blankfilter.isChecked()
 
-        if len(self.groupsetmodel) == 0:
+        if len(self.querys) == 0:
             if self.analysis_paramsgui.blnkfltr:
                 UIFunctions.addgroup(self, 'Features not in blanks')
-                src = list(self.groupsetmodel.selected.excl)
-                src.remove(self.analysis_paramsgui.blnkgrp)
-                self.groupsetmodel.update(self.groupsetmodel.selected_index,
-                    src=src, excl=[self.analysis_paramsgui.blnkgrp])
+                self.querys[0].src = self.querys[0].excl
+                self.querys[0].src.remove(self.analysis_paramsgui.blnkgrp)
+                self.querys[0].excl = [self.analysis_paramsgui.blnkgrp]
             else:
                 UIFunctions.addgroup(self, 'All features')
-                self.groupsetmodel.update(self.groupsetmodel.selected_index,
-                    src=self.groupsetmodel.selected.excl, excl=[])
+                self.querys[0].src = self.querys[0].excl
+                self.querys[0].excl = []
             UIFunctions.updategroups(self)
         else:
-            self.groupsetmodel.select(self.ui.listWidget_pltgrps.currentRow())
+            self.selset = self.ui.listWidget_pltgrps.currentRow()
             UIFunctions.writegroups(self)
             UIFunctions.updategroups(self)
         
@@ -1365,24 +1027,37 @@ class MainWindow(QMainWindow):
             self.atlas = self.atlas[self.atlas['genus'] == self.analysis_paramsgui.genus]
 
         
-        # A list of active filter-name tokens, not a hand-built string --
-        # consumers that need the old space-joined string shape (e.g. an
-        # older .mpct save) go through groupsets.normalize_graphfilters().
-        self.analysis_paramsgui.graphfilters = []
+        self.analysis_paramsgui.graphfilters = ''
         if self.ui.checkBox_cv.isChecked():
-            self.analysis_paramsgui.graphfilters.append('cv')
+            self.analysis_paramsgui.graphfilters += 'cv '
         if self.ui.checkBox_mp.isChecked():
-            self.analysis_paramsgui.graphfilters.append('rel')
+            self.analysis_paramsgui.graphfilters += 'rel '
         if self.ui.checkBox_decon.isChecked():
-            self.analysis_paramsgui.graphfilters.append('insource')
+            self.analysis_paramsgui.graphfilters += 'insource'
             self.analysis_paramsgui.deconthresh = float(self.ui.lineEdit_insourcethresh.text())
         
         
 
         
-        # Build the {descriptive_name: GroupSet} mapping MSFaST/plotting
-        # consume, merging in the active graph-level filters (cv/rel/insource).
-        querydict = build_query_dict(self.groupsetmodel, self.analysis_paramsgui.graphfilters)
+        tempquerydic = {}
+        for pos in range(len(self.querys)):
+            tempquery = query()
+            tempquery.colour = str(self.querys[pos].colour)
+            tempquery.name = self.querys[pos].name
+            tempquery.excl = ' '.join(self.querys[pos].excl)
+            tempquery.incl = ' '.join(self.querys[pos].incl)
+            tempquery.src = ' '.join(self.querys[pos].src)
+            tempquerydic[pos] = tempquery
+            
+        querydict = {}
+        for elem in tempquerydic:
+            tempquerydic[elem].excl += ' ' + self.analysis_paramsgui.graphfilters
+            queryname = tempquerydic[elem].src + ' +' + tempquerydic[elem].incl + ' -' + tempquerydic[elem].excl + ' c=' + tempquerydic[elem].colour + ' n=' + tempquerydic[elem].name
+            tempquerydic[elem].src = tempquerydic[elem].src.split()
+            tempquerydic[elem].incl = tempquerydic[elem].incl.split()
+            tempquerydic[elem].excl = tempquerydic[elem].excl.split()
+            querydict[queryname] = tempquerydic[elem]
+        
         self.analysis_paramsgui.querydict = querydict
         self.analysis_paramsgui.querylist = list(querydict.keys())
         
@@ -1400,21 +1075,80 @@ class MainWindow(QMainWindow):
     
         self.analysis_paramsgui.statstgrps = [str(self.ui.combo_expgrp.currentText()), str(self.ui.combo_ctrgrp.currentText())]
         self.analysis_paramsgui.cvthresh = float(self.ui.lineEdit_cvthresh.text())
+
+        # ============ 新增:读取加合物归组配置文件 adduct_config.txt ============
+        # 该文件与main.py同目录,用记事本编辑即可。控制:是否开启加合物/中性丢失归组、离子模式、离子形式列表。
+        import os as _os
+        _cfg_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'adduct_config.txt')
+        self.analysis_paramsgui.adductgrp = False
+        self.analysis_paramsgui.mdfil = False
+        self.analysis_paramsgui.md_halogen = False
+        self.analysis_paramsgui.adduct_list = None
+        self.analysis_paramsgui.adduct_mode = 'pos'
+        self.analysis_paramsgui.adduct_ppm = 3.0
+        self.analysis_paramsgui.corr_cut = 0.75
+        self.analysis_paramsgui.corr_p = 0.05
+        if _os.path.exists(_cfg_path):
+            _adducts = []
+            try:
+                with open(_cfg_path, 'r', encoding='utf-8') as _f:
+                    for _line in _f:
+                        _line = _line.strip()
+                        if (not _line) or _line.startswith('#'):
+                            continue
+                        if '=' in _line and ',' not in _line:
+                            _k, _v = [x.strip() for x in _line.split('=', 1)]
+                            if _k.lower() == 'enable':
+                                self.analysis_paramsgui.adductgrp = (_v.lower() in ('true', '1', 'yes', 'on'))
+                            elif _k.lower() == 'ppm':
+                                self.analysis_paramsgui.adduct_ppm = float(_v)
+                            elif _k.lower() == 'corr_cut':
+                                self.analysis_paramsgui.corr_cut = float(_v)
+                            elif _k.lower() == 'corr_p':
+                                self.analysis_paramsgui.corr_p = float(_v)
+                            elif _k.lower() == 'mass_defect':
+                                self.analysis_paramsgui.mdfil = (_v.lower() in ('true','1','yes','on'))
+                            elif _k.lower() == 'md_halogen':
+                                self.analysis_paramsgui.md_halogen = (_v.lower() in ('true','1','yes','on'))
+                            elif _k.lower() == 'mode':
+                                # 离子模式:决定基准离子形式([M+H]+ / [M-H]-)
+                                self.analysis_paramsgui.adduct_mode = _v.strip().lower()
+                        elif ',' in _line:
+                            _parts = [x.strip() for x in _line.split(',')]
+                            if len(_parts) >= 2:
+                                try:
+                                    _adducts.append((_parts[0], float(_parts[1])))
+                                except ValueError:
+                                    pass
+                if _adducts:
+                    self.analysis_paramsgui.adduct_list = _adducts
+                print('adduct_config.txt loaded: mode=%s, adduct=%s, mass_defect=%s, %d ion forms, ppm=%s' %
+                      (self.analysis_paramsgui.adduct_mode, self.analysis_paramsgui.adductgrp, self.analysis_paramsgui.mdfil, len(_adducts), self.analysis_paramsgui.adduct_ppm))
+            except Exception as _e:
+                print('Warning: failed to read adduct_config.txt:', _e)
+        else:
+            print('adduct_config.txt not found; adduct grouping disabled.')
+        # ============ 新增结束 ============
         if self.ui.radioButton_meancv.isChecked():
             self.analysis_paramsgui.cvparam = 'average CV'
         else:
             self.analysis_paramsgui.cvparam = 'median CV'
             
         
-        # Plain 1:1 checkbox fields (no branching/derived values) -- see
-        # paramfields.py for the shared save/restore schema; the matching
-        # restore side is loadsession()'s restore_checkbox_fields() call.
-        save_checkbox_fields(self, self.analysis_paramsgui)
-
-        # pqthresh / fcthresh / colorscheme moved to the volcano & heatmap plots'
-        # own live control bars (plotting.py); no longer sourced from the dialog
-        # here, and intentionally not persisted to .mpct (same as the dendrogram's
-        # per-plot controls).
+        self.analysis_paramsgui.PCA = self.ui.checkBox_pca.isChecked()
+        self.analysis_paramsgui.Dendrogram = self.ui.checkBox_dend.isChecked()
+        self.analysis_paramsgui.bootstrap = self.dialog.ui.checkBox_bootstrap.isChecked()
+        self.analysis_paramsgui.MZRTplt = self.ui.checkBox_mzrt.isChecked()
+        self.analysis_paramsgui.KMD = self.ui.checkBox_kmd.isChecked()
+        self.analysis_paramsgui.mdguide = self.dialog.ui.checkBox_mdguide.isChecked()
+        self.analysis_paramsgui.FC = self.ui.checkBox_fc.isChecked()
+        self.analysis_paramsgui.FC3Dplt = self.ui.checkBox_3dfc.isChecked()
+        self.analysis_paramsgui.Ttest = self.ui.checkBox_ttest.isChecked()
+        self.analysis_paramsgui.Volcanoplt = self.ui.checkBox_volcano.isChecked()
+        self.analysis_paramsgui.pqthresh = float(self.dialog.ui.lineEdit_pqthresh.text())
+        self.analysis_paramsgui.fcthresh = float(self.dialog.ui.lineEdit_fcthresh.text())
+        self.analysis_paramsgui.colorscheme = self.dialog.ui.combo_colorscheme.currentText()
+        self.analysis_paramsgui.FDR = self.ui.checkBox_FDR.isChecked()
         self.analysis_paramsgui.relfil = self.ui.checkBox_mp.isChecked()
         self.analysis_paramsgui.CVfil = self.ui.checkBox_cv.isChecked()
         self.analysis_paramsgui.decon = self.ui.checkBox_decon.isChecked()
@@ -1440,15 +1174,46 @@ class MainWindow(QMainWindow):
     
     
     def regenerateplts(self):
-        """Re-render plots in place (e.g. from the dialog's "Apply" button)
-        without re-running the analysis pipeline.
-
-        Delegates to the same create-or-reset logic used after a fresh
-        analysis, so a plot that doesn't exist yet (e.g. because the prior
-        analysis had it disabled) is created rather than crashing on
-        ``.reset()``.
-        """
-        self._generate_plots()
+        pltfile = self.analysis_paramsgui.outputdir / (self.analysis_paramsgui.filename.stem + '_filtered.csv')
+        dfs = self.filtereddfs
+        grpsts = self.groupsets
+    
+        if self.analysis_paramsgui.CVfil:
+            self.prevcv.reset(self, '', '')
+            stop_functime('cvplt complete')
+    
+        self.ftplt.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', '', '')
+        stop_functime('ftplt complete')
+    
+        self.dend.reset(pltfile, '', '')
+        stop_functime('dendrogram complete')
+    
+        if self.analysis_paramsgui.PCA:
+            self.pca.reset(pltfile, '', '')
+            stop_functime('nmds complete')
+    
+        if self.analysis_paramsgui.FC3Dplt:
+            self.fc3d.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            stop_functime('fc3d complete')
+    
+        if self.analysis_paramsgui.KMD:
+            self.kmd.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            stop_functime('kmd complete')
+    
+        if self.analysis_paramsgui.MZRTplt:
+            self.mzrt.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            stop_functime('mzrt complete')
+    
+        if self.analysis_paramsgui.Volcanoplt:
+            self.volcano.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+            stop_functime('volcano complete')
+    
+        self.heatmap.reset(self,  'heatmap', self.ui.frame_heatmap, pltfile)
+        stop_functime('heatmap complete')
+    
+        self.samplecorr.reset(self.analysis_paramsgui.outputdir / 'iondict.csv', dfs, grpsts)
+        stop_functime('samplecorr complete')
+    
         self.ui.label_status.setText('Update Complete')
 
         
@@ -1460,43 +1225,9 @@ class MainWindow(QMainWindow):
         
     
 if __name__ == "__main__":
-    # Required for pvclust.py's multiprocessing.Pool() (bootstrap dendrogram)
-    # to work in a PyInstaller-frozen exe: without it, each worker process
-    # re-executes the whole frozen program from scratch instead of running
-    # just the pool target, spawning a new QApplication/MainWindow per
-    # worker. A no-op everywhere else (plain `python main.py`, Spyder),
-    # so safe to call unconditionally.
-    multiprocessing.freeze_support()
     app = QtWidgets.QApplication(sys.argv)
     if sys.platform != 'win32':
         app.setStyle('Fusion')
     app.setStyleSheet("QFrame { border: 0px; }") #QToolTip { color: #999999; background-color: rgb(0, 255, 0); border: 1px solid grey; }")
-
-    # Crash reporting: on an unhandled exception, log a full report and offer to
-    # open a prefilled GitHub issue (nothing is sent without the user clicking
-    # through). Installed after the QApplication exists so the dialog can show.
-    # See crashreport.py for the design (and why not Sentry).
-    def _crash_dialog(report, log_path, issue_url):
-        try:
-            text = 'An unexpected error occurred.'
-            if log_path:
-                text += '\n\nA crash log was saved to:\n' + log_path
-            text += ('\n\nReport this on GitHub? Your browser will open a '
-                     'prefilled issue — nothing is sent automatically.')
-            if styled_message_box(
-                    None, QtWidgets.QMessageBox.Critical,
-                    'MPACT encountered an error', text,
-                    buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    default=QtWidgets.QMessageBox.No,
-                    detailed=report) == QtWidgets.QMessageBox.Yes and issue_url:
-                webbrowser.open(issue_url)
-        except Exception:
-            pass
-
-    crashreport.install_excepthook(
-        _crash_dialog,
-        log_dir=str(Path.home() / '.mpact' / 'crashlogs'),
-        repo=mpactupdate.DEFAULT_REPO)
-
     window = MainWindow()
     sys.exit(app.exec_())

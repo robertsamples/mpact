@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import math
 import scipy.cluster.hierarchy as spc
+from scipy import stats
 import mspwriter
 from tqdm import tqdm
 
@@ -302,70 +303,374 @@ def cvfilter(analysis_params, ionfilterlist, threshold):
 # -----Deringing and relational filter algorithm-----
 def relationalfilter(analysis_params, ionfilterlist):
     """
-    Implements a de-ringing and relational filtering algorithm for MS data.
+    改进版关系过滤:去除同位素、振铃、二聚体三类冗余峰。
 
-    Parameters:
-        analysis_params (object): Analysis parameters.
-        ionfilterlist (dict): Dictionary of ion filters.
+    相比原版的改进(每处都有注释):
+    - 同位素:质量差=n×1.0033548(n=1~3),按ppm容差,且要求【弱于母峰】+ 跨样品相关高
+    - 振铃:强度<母峰的一定比例(默认1%)+ 质量差<一定ppm(默认800ppm)——文献标准,不再用过宽的 floor(md*2)%2 判据
+    - 二聚体:质量差小数部分≈0.5004(修正原版缺abs的bug)+ 弱于母峰 + 相关高
+    - 全局扫描:每个峰独立在其RT窗内寻找母峰
 
-    Returns:
-        dict: Dictionary of ion filters.
-
-    The algorithm works by first sorting the MS data by m/z, and then iterating over the data one ion at a time, 
-    comparing each ion to all subsequent ions that fall within a certain mass and retention time window. 
-    Ions that meet certain criteria are then merged into a single ion using the ionmerge class. 
-
-    The filtering criteria includes:
-    - A mass difference of less than a specified value
-    - A retention time difference of less than a specified value
-    - A difference between the mass difference and its floor when multiplied by a factor, indicating the presence of ring artifacts
-    - A difference between the mass difference and 0.5004 when accounting for the doubly-charged dimer, indicating the presence of dimer peaks
-
-    The function returns a dictionary of ion filters, with the 'relfil' filter containing a list of ions to remove, 
-    and a 'merge' attribute which contains the merge groups (as an ionmerge object) that specify which ions to merge.
+    新增可调参数(analysis_params,若无则用默认):
+        iso_ppm(默认3)、iso_max_n(默认3)、iso_ratio_max(默认0.7)
+        ring_ratio_max(默认0.01)、ring_ppm(默认800)
+        dimer_tol(默认0.02)、corr_cut(默认0.75)、corr_p(默认0.05)
+        (RTwin 沿用原参数)
     """
-    
-    print('Running relational filter')
-    pdindex = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), sep = ',', header = [2], index_col = None)
-    pdindex.drop(pdindex.columns.difference(['Compound','m/z','Retention time (min)']), axis=1, inplace=True)
-    pdindex = pdindex.sort_values(['m/z'], ascending=[1])
-    npindex = pdindex.to_numpy()
+    print('Running relational filter (improved: isotope/ringing/dimer with intensity+correlation)')
 
-    ion_position, ion_comp_pos, current_rt, current_mass, mass_diff, kmd_diff, cut_ions, mergegroups = 0, 0, 0, 0, 0, 0, [], {}
-    for ions in npindex[0:,0]: #scrolls through ions in order and checks if any subsequent ions fall within time and mass filter range, any ions that are are copied to a list
-        current_rt = npindex[ion_position, 2]
-        current_mass = npindex[ion_position, 1]
-        current_ion = npindex[ion_position, 0]
-        ion_comp_pos = ion_position + 1
-        if (current_ion not in cut_ions):
-            for ions in npindex[ion_comp_pos:, 0]: # the following statement checks if any peaks are within 0.05 min and in the mass filtering window.
-                    #The mass filtering window works by checking if the difference of the two ions, when multiplied by two and floored, is even this
-                    #corresponds to filtering out ions within 0.5 daltons of a peak or any of its first five isotopic peaks.
-                mass_diff = abs((npindex[ion_comp_pos, 1] - current_mass))
-                kmd_diff = mass_diff - math.floor(mass_diff)
-                if ((npindex[ion_comp_pos, 1] - current_mass) > analysis_params.maxisowin - .4):
-                    break    # breaks loop if we are already past the maximum consideration window for isotope shift, saves considerable processsing time.
-                if ((abs(npindex[ion_comp_pos, 2]-current_rt) <= analysis_params.RTwin) # RT band
-                    and ((npindex[ion_comp_pos, 1] - current_mass) <= analysis_params.maxisowin - .4)
-                    and ((math.floor(mass_diff * (1/analysis_params.ringingwin)) % (1/analysis_params.ringingwin) == 0) #band for ringing
-                    or ((kmd_diff - .5004 - (math.floor(mass_diff) * .007))  < analysis_params.dimerpeakwin)) #band for doubly charged dimer removal, CHECK TO SEE IF CAN USE MOD FOR THIS
-                    and (npindex[ion_comp_pos, 0] not in cut_ions)): # check if ion already removed
-                    
-                    cut_ions.append(npindex[ion_comp_pos, 0]) #creates or appends merge group to indicate which ions to be merged. Merge not yet implimented
-                    if current_ion in mergegroups:
-                        mergegroups[current_ion].sources.append(npindex[ion_comp_pos, 0])
+    # ---- 参数(可调,带默认)----
+    iso_ppm       = getattr(analysis_params, 'iso_ppm', 3.0)
+    iso_max_n     = getattr(analysis_params, 'iso_max_n', 3)
+    iso_ratio_max = getattr(analysis_params, 'iso_ratio_max', 0.70)
+    ring_ratio    = getattr(analysis_params, 'ring_ratio_max', 0.01)
+    ring_ppm      = getattr(analysis_params, 'ring_ppm', 800.0)
+    dimer_tol     = getattr(analysis_params, 'dimer_tol', 0.02)
+    corr_cut      = getattr(analysis_params, 'corr_cut', 0.75)
+    corr_p        = getattr(analysis_params, 'corr_p', 0.05)
+    rt_win        = analysis_params.RTwin
+    C13           = 1.0033548
+
+    # ---- 读 m/z, RT ----
+    pdindex = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                          sep=',', header=[2], index_col=None)
+    pdindex.drop(pdindex.columns.difference(['Compound', 'm/z', 'Retention time (min)']), axis=1, inplace=True)
+
+    # ---- 读各样品强度矩阵(用于强度比较 + 跨样品相关)----
+    # 内存优化:用numpy数组+id->行号映射,不给每个峰单独存字典(省内存)
+    _full = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                        sep=',', header=[0, 1, 2], index_col=[0], low_memory=False)
+    _lvl0 = [str(c[0]) for c in _full.columns]
+    _keep = [i for i, g in enumerate(_lvl0) if ('BLANK' not in g.upper()) and (g.upper() != 'QC')]
+    _IDS = _full.index.to_numpy()
+    _INT = _full.iloc[:, _keep].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy(dtype=np.float32)  # float32省一半内存
+    _row_of = {int(_IDS[k]): k for k in range(len(_IDS))}
+    _MAX = _INT.max(axis=1)
+    del _full  # 释放原始DataFrame
+    import gc; gc.collect()
+
+    def _get_int(cid):
+        k = _row_of.get(int(cid))
+        return _INT[k] if k is not None else None
+    def _get_max(cid):
+        k = _row_of.get(int(cid))
+        return float(_MAX[k]) if k is not None else 0.0
+
+    def _corr_ok(id_a, id_b):
+        """跨样品Pearson相关(CAMERA标准:r>corr_cut 且 p<corr_p)"""
+        a, b = _get_int(id_a), _get_int(id_b)
+        if a is None or b is None:
+            return False
+        mask = (a > 0) | (b > 0)
+        if mask.sum() < 4:
+            return True  # 样品太少无法检验,放行(靠质量差+RT)
+        try:
+            r, pv = stats.pearsonr(a[mask], b[mask])
+        except Exception:
+            return True
+        if not np.isfinite(r):
+            return True
+        return (r > corr_cut) and (pv < corr_p)
+
+    # ---- 全局扫描:按m/z排序,每个峰在RT窗内找母峰 ----
+    arr = pdindex.sort_values(['m/z']).to_numpy()   # 列: Compound, m/z, RT
+    comp = arr[:, 0]
+    mz   = arr[:, 1].astype(float)
+    rt   = arr[:, 2].astype(float)
+    n = len(comp)
+    order = np.argsort(mz)
+    mzs = mz[order]
+
+    cut_ions = []
+    cut_set = set()
+    mergegroups = {}
+
+    # 迭代到收敛(删除会改变可用母峰),最多几轮
+    changed = True
+    rounds = 0
+    while changed and rounds < 6:
+        changed = False
+        rounds += 1
+        for i in range(n):
+            cid = comp[i]
+            if cid in cut_set:
+                continue
+            m0, r0 = mz[i], rt[i]
+            i0 = _get_max(cid)
+            lo = np.searchsorted(mzs, m0 - (iso_max_n + 0.1))
+            hi = np.searchsorted(mzs, m0 - 1e-9)
+            for oi in range(lo, hi):
+                j = order[oi]
+                pid = comp[j]
+                if pid in cut_set or pid == cid:
+                    continue
+                dm = m0 - mz[j]
+                if dm <= 0:
+                    continue
+                if abs(rt[j] - r0) > rt_win:
+                    continue
+                pmax = _get_max(pid)
+                if pmax <= 0:
+                    continue
+                ratio = i0 / pmax
+                kmd = dm - math.floor(dm)
+                nn = round(dm / C13)
+                iso_dev = abs(dm - nn * C13) / m0 * 1e6 if nn >= 1 else 1e9
+
+                hit = False
+                # 同位素:整数13C间隔 + 弱于母峰(<比例上限) + (相关高 或 强度比很低)
+                if (1 <= nn <= iso_max_n) and (iso_dev < iso_ppm) and (0 < ratio <= iso_ratio_max):
+                    if _corr_ok(pid, cid) or ratio < 0.5:
+                        hit = True
+                # 二聚体:质量差小数部分≈0.5004(修正abs) + 弱于母峰 + 相关
+                if (not hit) and (abs(kmd - 0.5004) < dimer_tol) and (ratio < 0.7):
+                    if _corr_ok(pid, cid):
+                        hit = True
+                # 振铃:强度<母峰比例 + 质量差<ring_ppm(紧邻)
+                if (not hit) and (dm < m0 * ring_ppm / 1e6) and (ratio < ring_ratio):
+                    hit = True
+
+                if hit:
+                    cut_ions.append(cid)
+                    cut_set.add(cid)
+                    if pid in mergegroups:
+                        mergegroups[pid].sources.append(cid)
                     else:
-                        mergegroups[current_ion] = ionmerge(current_ion, npindex[ion_comp_pos, 0])
-                ion_comp_pos += 1
-        ion_position += 1
+                        mergegroups[pid] = ionmerge(pid, cid)
+                    changed = True
+                    break
+
     ionfilterlist['relfil'] = ionfilter('', cut_ions)
     ionfilterlist['relfil'].merge = mergegroups
 
-    iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep = ',', header = [0], index_col = 0)
+    iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
     iondict['pass_relfil'] = ~iondict.index.isin(ionfilterlist['relfil'].ions)
-    iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header = True, index = True) #saves formatted backup for later use
+    iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
 
     return(ionfilterlist)
+
+
+def adductgroup(analysis_params, adduct_list=None):
+    """
+    加合物 / 在源裂解(丢水) / 二聚体 归组模块(第二步新增)。
+
+    围绕同一中性分子,把它的不同离子形式(M+Na/K/NH4、丢水、二聚体等)归为一组。
+    判据:RT相同 + 质量差匹配加合物表(ppm) + 跨样品Pearson相关(CAMERA标准 r>corr_cut 且 p<corr_p)。
+    每组选"检出均值最高"的峰为主峰,整行原样保留;其他离子形式移到归属表。
+
+    输出:
+      - adduct_attribution.csv:归属表。一行一个峰,主峰在前(标'主峰'),归属峰跟随,
+        组间空行分隔;含各样品峰面积、加合形式、m/z、RT。
+      - iondict.csv 增加两列:pass_adduct(主峰/未归组=True,归属峰=False)、adduct_form(离子形式)
+
+    可调参数(analysis_params,带默认):
+      adduct_ppm(3)、adduct_rt_win(默认取RTwin)、corr_cut(0.75)、corr_p(0.05)
+    adduct_list:[(名称, 相对M+H质量差), ...];None则用默认正离子表。
+    用户可传自己勾选的加合物子集(名称+相对M+H的delta)。
+    """
+    print('Running adduct / in-source / dimer grouping')
+
+    ppm      = getattr(analysis_params, 'adduct_ppm', 3.0)
+    rt_win   = getattr(analysis_params, 'adduct_rt_win', getattr(analysis_params, 'RTwin', 0.033))
+    corr_cut = getattr(analysis_params, 'corr_cut', 0.75)
+    corr_p   = getattr(analysis_params, 'corr_p', 0.05)
+
+    H=1.007276; Na=22.989770; K=38.963707; NH4=18.033823; H2O=18.010565
+    if adduct_list is None:
+        # 默认正离子(用户可传自己勾选的). 相对 M+H 的质量差:
+        adduct_list = [
+            ('M+Na',     Na - H),     # +21.982
+            ('M+K',      K - H),      # +37.956
+            ('M+NH4',    NH4 - H),    # +17.027
+            ('M-H2O+H',  -H2O),       # -18.011 (在源丢1水)
+            ('M-H4O2+H', -2*H2O),     # -36.021 (在源丢2水)
+        ]
+    form_deltas = [(name, d) for name, d in adduct_list if abs(d) > 1e-6]
+
+    # ---- 基准离子形式:由 adduct_config.txt 的 mode 决定(pos -> M+H,neg -> M-H)----
+    _mode = str(getattr(analysis_params, 'adduct_mode', '') or '').strip().lower()
+    if _mode.startswith('neg'):
+        base_form = 'M-H'
+    elif _mode.startswith('pos'):
+        base_form = 'M+H'
+    else:
+        base_form = 'M+H'
+        print('  Warning: adduct_config.txt 里没读到 mode,暂按正离子(M+H)处理')
+    # 一致性检查:mode 与离子形式表对不上就提醒(防止用错配置文件)
+    _npos = sum(1 for _nm, _ in form_deltas if str(_nm).strip().endswith('+H'))
+    _nneg = sum(1 for _nm, _ in form_deltas if str(_nm).strip().endswith('-H'))
+    if base_form == 'M-H' and _npos > _nneg:
+        print('  Warning: mode=neg,但离子形式表像是正离子的(%d 个以 +H 结尾),请检查 adduct_config.txt' % _npos)
+    if base_form == 'M+H' and _nneg > _npos:
+        print('  Warning: mode=pos,但离子形式表像是负离子的(%d 个以 -H 结尾),请检查 adduct_config.txt' % _nneg)
+    print('  base ion form: %s   (mode=%s, %d ion forms)' % (base_form, _mode or 'unset', len(form_deltas)))
+
+    _full = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                        sep=',', header=[0,1,2], index_col=[0], low_memory=False)
+    mz_col = _full.columns[0]; rt_col = _full.columns[1]
+    mz_all = pd.to_numeric(_full[mz_col], errors='coerce').to_numpy()
+    rt_all = pd.to_numeric(_full[rt_col], errors='coerce').to_numpy()
+    ids = _full.index.to_numpy()
+    data_cols = list(_full.columns[2:])
+    samp_cols_for_corr = [c for c in data_cols if ('BLANK' not in str(c[0]).upper()) and (str(c[0]).upper()!='QC')]
+    INT_all  = _full[data_cols].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy(dtype=np.float32)
+    CORR_mat = _full[samp_cols_for_corr].apply(pd.to_numeric, errors='coerce').fillna(0.0).to_numpy(dtype=np.float32)
+    row_of = {int(ids[k]): k for k in range(len(ids))}
+    del _full
+    import gc; gc.collect()
+
+    def detmean(k):
+        v = CORR_mat[k]; nz = v[v>0]
+        return float(nz.mean()) if nz.size else 0.0
+    detmean_all = np.array([detmean(k) for k in range(len(ids))])
+
+    def corr_ok(ka, kb):
+        a, b = CORR_mat[ka], CORR_mat[kb]
+        mask = (a>0)|(b>0)
+        if mask.sum() < 4: return True
+        try: r, pv = stats.pearsonr(a[mask], b[mask])
+        except Exception: return True
+        if not np.isfinite(r): return True
+        return (r > corr_cut) and (pv < corr_p)
+
+    order = np.argsort(mz_all)
+    mzs_sorted = mz_all[order]
+    assigned = {}
+    groups = {}
+    for i in range(len(ids)):
+        cid = int(ids[i])
+        if cid in assigned: continue
+        m0, r0 = mz_all[i], rt_all[i]
+        if not np.isfinite(m0): continue
+        members = [(cid, base_form)]
+        for name, delta in form_deltas:
+            target_mz = m0 + delta
+            lo = np.searchsorted(mzs_sorted, target_mz*(1-ppm/1e6)-0.001)
+            hi = np.searchsorted(mzs_sorted, target_mz*(1+ppm/1e6)+0.001)
+            for oi in range(lo, hi):
+                j = order[oi]; jid = int(ids[j])
+                if jid == cid or jid in assigned: continue
+                if abs(mz_all[j]-target_mz)/target_mz*1e6 > ppm: continue
+                if abs(rt_all[j]-r0) > rt_win: continue
+                if corr_ok(i, j):
+                    members.append((jid, name)); assigned[jid] = (cid, name); break
+        if len(members) > 1:
+            groups[cid] = members; assigned[cid] = (cid, 'M+H')
+
+    removed_ids = set()
+    attribution_rows = []
+    header_cols = ['Compound','m/z','Retention time (min)','adduct_form','is_main'] + [str(c[2]) for c in data_cols]
+    form_map = {}
+    for base, members in groups.items():
+        best = max(members, key=lambda x: detmean_all[row_of[x[0]]])
+        main_id = best[0]
+        mem_forms = dict(members)
+        for mid, form in members:
+            form_map[mid] = form
+            if mid != main_id: removed_ids.add(mid)
+        def make_row(pid, form, is_main):
+            k = row_of[pid]
+            return [pid, round(mz_all[k],4), round(rt_all[k],4), form, ('main' if is_main else ''), *list(INT_all[k])]
+        attribution_rows.append(make_row(main_id, mem_forms[main_id], True))
+        for mid, form in members:
+            if mid != main_id:
+                attribution_rows.append(make_row(mid, form, False))
+        attribution_rows.append([None]*len(header_cols))
+
+    pd.DataFrame(attribution_rows, columns=header_cols).to_csv(
+        analysis_params.outputdir / 'adduct_attribution.csv', index=False)
+
+    iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
+    iondict['pass_adduct'] = ~iondict.index.isin(removed_ids)
+    iondict['adduct_form'] = iondict.index.map(lambda x: form_map.get(x,''))
+    iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
+
+    print('  adduct grouping: %d groups, %d redundant ions moved to attribution table' % (len(groups), len(removed_ids)))
+    return removed_ids
+
+
+# -----Mass defect filter-----
+def md_plausible(mz, hi_slope, hi_int, lo_slope, lo_int):
+    """
+    判断 m/z 是否可能是单电荷 CHNOPS 小分子离子。
+
+    允许区间(按质量线性变化的质量亏损上下界):
+        上界 hi(m) = hi_slope*m + hi_int   (饱和烃 / 脂类, H 最多)
+        下界 lo(m) = lo_slope*m + lo_int   (高度磷酸化/硫酸化, 杂原子最多)
+    质量亏损 = m/z - 名义质量, 名义质量未知。只要存在某个整数 N 使
+    lo <= m/z - N <= hi 即视为可能。这样不会出现 floor/round 带来的"翻转"
+    问题(脂类亏损 >0.5、高分子量 >1 时依然正确)。
+    注意: 区间宽度在 m/z ~650 以上超过 1 Da, 此时所有 m/z 都会通过 ——
+    这是物理事实, 不是 bug: 质量亏损只能剔除低质量端的不可能离子。
+    """
+    mz = np.asarray(mz, dtype=float)
+    hi = hi_slope * mz + hi_int
+    lo = lo_slope * mz + lo_int
+    return np.ceil(mz - hi) <= np.floor(mz - lo)
+
+
+def mdfilter(analysis_params, ionfilterlist):
+    """
+    质量亏损过滤:剔除 m/z 在化学上不可能对应单电荷 CHNOPS 分子的离子
+    (噪声、盐簇、背景离子、未识别的多电荷离子等)。
+
+    结果写入:
+      - ionfilterlist['massdefect']
+      - iondict.csv 新增 'mass_defect'(m/z - round(m/z))与 'pass_mdfil'
+        (applyfilters 会自动应用所有 pass_* 列)
+    若 md_drop_early=True(默认), 还会把不通过的离子直接从 _formatted.csv 删除,
+    避免它们参与后续 decon(在源碎片聚类会把最高 m/z 当母离子, 一个不可能的
+    高 m/z 噪声可能把真实离子误判为它的碎片)和 relationalfilter。
+    因此请在 relationalfilter / decon 之前调用。
+
+    可调参数(analysis_params, 带默认):
+      md_hi_slope (0.00112)  md_hi_int (0.03)    上界
+      md_lo_slope (-0.00025) md_lo_int (-0.03)   下界
+      md_halogen  (False)    True 时下界放宽到含多个 Cl/Br 的水平
+      md_drop_early (True)
+    默认值按 [M+H]+ 估计, ±0.03 的截距余量覆盖 [M+Na]+、[M+NH4]+、[M-H]- 等
+    常见加合物的偏移。若有 HMDB/RefMet 拟合的包络线, 直接替换这四个数即可。
+    """
+    print('Running mass defect filter')
+
+    hi_slope = getattr(analysis_params, 'md_hi_slope', 0.00112)
+    hi_int   = getattr(analysis_params, 'md_hi_int', 0.03)
+    lo_slope = getattr(analysis_params, 'md_lo_slope', -0.00025)
+    lo_int   = getattr(analysis_params, 'md_lo_int', -0.03)
+    if getattr(analysis_params, 'md_halogen', False):
+        lo_slope = getattr(analysis_params, 'md_lo_slope_halogen', -0.0011)
+        lo_int   = getattr(analysis_params, 'md_lo_int_halogen', -0.05)
+    drop_early = getattr(analysis_params, 'md_drop_early', True)
+
+    fpath = analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv')
+    idx = pd.read_csv(fpath, sep=',', header=[2], index_col=None)
+    idx = idx[['Compound', 'm/z']].copy()
+    idx['m/z'] = pd.to_numeric(idx['m/z'], errors='coerce')
+
+    ok = md_plausible(idx['m/z'].to_numpy(), hi_slope, hi_int, lo_slope, lo_int)
+    ok = ok & idx['m/z'].notna().to_numpy()
+    fail_ids = idx.loc[~ok, 'Compound'].tolist()
+    fail_str = set(str(x) for x in fail_ids)
+
+    ionfilterlist['massdefect'] = ionfilter(
+        {'hi_slope': hi_slope, 'hi_int': hi_int, 'lo_slope': lo_slope, 'lo_int': lo_int},
+        fail_ids)
+
+    # iondict: 写质量亏损和 pass 列(用字符串匹配 ID, 避免 int/str 类型不一致)
+    md_map = dict(zip(idx['Compound'].astype(str), idx['m/z'] - np.round(idx['m/z'])))
+    iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
+    key = iondict.index.astype(str)
+    iondict['mass_defect'] = [md_map.get(k, np.nan) for k in key]
+    iondict['pass_mdfil'] = ~key.isin(fail_str)
+    iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
+
+    if drop_early and fail_ids:
+        msdata = pd.read_csv(fpath, sep=',', header=[0, 1, 2], index_col=[0])
+        msdata = msdata[~msdata.index.astype(str).isin(fail_str)]
+        msdata.to_csv(fpath, header=True, index=True)
+
+    print('  mass defect filter: %d / %d ions failed' % (len(fail_ids), len(idx)))
+    return ionfilterlist
 
 
 def mergeions(analysis_params, ion_filters):
@@ -409,29 +714,34 @@ def mergeions(analysis_params, ion_filters):
     msdata_merged.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), header=True, index=True)
 
     # Format the merged data frame and save it
-    msdata_merged = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), sep=',', header=None, index_col=None, low_memory=False)
-    # Columns 0-2 (row 2 currently blank/NaN here) get inferred as float64
-    # since every other row in them is numeric -- widen to object first so
-    # assigning the text header labels below doesn't try to losslessly cast
-    # a string into a float64 column. Newer pandas raises on that (it used
-    # to silently upcast with just a FutureWarning).
-    msdata_merged[msdata_merged.columns[0:3]] = msdata_merged[msdata_merged.columns[0:3]].astype(object)
+    msdata_merged = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_merged.csv'), sep=',', header=None, index_col=None)
     msdata_merged.iloc[2, 0:3] = ['Compound', 'm/z', 'Retention time (min)']
     msdata_merged.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), header=False, index=False)
 
 def applyfilters(analysis_params, ion_filters):
     """
-    Applies a list of ion filters to the data.
-    
-    Parameters:
-        analysis_params (object): Analysis parameters.
-        ion_filters (dict): Dictionary of ion filters.
-    
-    Returns:
-        None
+    Apply filters to the data.
+
+    改进版:以 iondict 的 pass_* 列为唯一依据删除,确保 filtered 表与 iondict 完全同步。
+    (原版用 ion_filters 字典,在多过滤器/多轮运行时易与 iondict 的 pass 列不同步,
+     导致 filtered 里残留应删除的峰。)
+    只有所有 pass_* 列都为 True 的特征才保留。
     """
-    ms_data_out_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), sep=',', header=None, index_col=None, low_memory=False)  # reopen original data
-    for elem in ion_filters:
-        ms_data_out_filtered = listfilter(ms_data_out_filtered, ion_filters[elem].ions, False)
-    ms_data_out_filtered.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'), index=False, header=False)  # saves output
-    
+    ms_data_out_filtered = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                                       sep=',', header=None, index_col=None)
+    # 读 iondict,取所有 pass_* 列
+    iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
+    passcols = [c for c in iondict.columns if str(c).startswith('pass')]
+    # 全部 pass 为 True 的 Compound 才保留
+    keep_mask = pd.Series(True, index=iondict.index)
+    for _c in passcols:
+        keep_mask = keep_mask & (iondict[_c].astype(str).str.strip().str.upper() == 'TRUE')
+    keep_ids = set(iondict.index[keep_mask].astype(str))
+
+    # formatted 前3行是表头(组/样品/列名),数据从第4行;第一列是 Compound
+    header = ms_data_out_filtered.iloc[:3]
+    body = ms_data_out_filtered.iloc[3:]
+    body_keep = body[body.iloc[:, 0].astype(str).isin(keep_ids)]
+    out = pd.concat([header, body_keep], ignore_index=True)
+    out.to_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_filtered.csv'),
+               index=False, header=False)

@@ -4,23 +4,30 @@ Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 """
 
 ## ==> GUI FILE
-from main import MainWindow, start_functime, stop_functime, reset_runtime
-import webbrowser  # used by masst() to open the GNPS single-spectrum search
+from main import MainWindow, query, start_functime, stop_functime, reset_runtime, ftrdialog, dialog
+#import masstdriver #from old version of masst search push
+import webbrowser #may not be needed now
 from mzmineimport import format_check
-from paramfields import restore_checkbox_fields
 
+import sys
 import pandas as pd
 pd.options.mode.chained_assignment = None  # default='warn'
+import time
 
-from PyQt5 import QtCore
-from PyQt5.QtWidgets import QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
-from PyQt5.QtGui import QColor
+import platform
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtWidgets import QMainWindow, QSizeGrip, QGraphicsDropShadowEffect, QFileDialog, QListWidgetItem, QColorDialog
+from PyQt5.QtCore import (QCoreApplication, QPropertyAnimation, QDate, QDateTime, QMetaObject, QObject, QPoint, QRect, QSize, QTime, QUrl, Qt, QEvent)
+from PyQt5.QtGui import QBrush, QColor, QIcon, QPalette, QPainter, QPixmap
 from pathlib import Path
 
 
-# Imported for its side effect only (registers the Qt resource blobs used by
-# the stylesheets/icons); do not remove even though it looks unused.
+# IMPORT FUNCTIONS AND RESOURCES
 import files
+
+from MSFaST import analysis_parameters
+
+import os
 
 
 
@@ -28,48 +35,6 @@ import files
 ## ==> GLOBALS
 
 GLOBAL_STATE = 0
-
-# Tab-switch tables. Each nav button maps to the stacked-widget page(s) it
-# selects (plus, for plot tabs, any dialog-frame show/hide deltas to apply
-# after the bar reset). goto_maintab()/goto_plottab() are the single
-# data-driven dispatchers that replace the ~15 near-identical goto_* methods;
-# the buttons are wired to them by key in uiDefinitions(). Module-level (not
-# self/class attributes) because the dispatchers run with a MainWindow `self`,
-# not a UIFunctions instance.
-#
-# _MAINBAR_TABS:  key -> (stackedWidget index, active-button attr on self.ui)
-_MAINBAR_TABS = {
-    'import': (0, 'btn_import'),
-    'filter': (1, 'btn_filter'),
-    'params': (2, 'btn_parameters'),
-    'plot':   (3, 'btn_plots'),
-    'info':   (4, 'btn_info'),
-    'search': (5, 'btn_search'),
-}
-# _PLOTBAR_TABS: key -> (infobar index, plot index, active-button attr,
-#                        [(action, dialog.ui widget attr), ...] applied after reset)
-_PLOTBAR_TABS = {
-    'review':  (0, 1, 'btn_review',  []),
-    'upset':   (1, 9, 'btn_upset',   []),
-    'dend':    (1, 2, 'btn_dend',    []),
-    'pca':     (1, 3, 'btn_pca',     [('show', 'frame_2')]),
-    'mzrt':    (0, 4, 'btn_mzrt',    []),
-    'kmd':     (0, 5, 'btn_kmd',     []),
-    '3dfc':    (0, 6, 'btn_3dfc',    []),
-    'volcano': (0, 7, 'btn_volcano', []),
-    'heatmap': (0, 8, 'btn_heatmap', []),
-}
-
-# Nav-button stylesheets. Defined once here instead of being rebuilt on
-# every reset_*bar() call (and read back off self.ui, where they were
-# only ever used internally). The plot tab bar and the feature-info dialog
-# bar shared a visually identical light style (the two former copies
-# differed only by insignificant CSS whitespace), so they now share one
-# pair. The left main-nav bar has its own (dark/transparent) theme.
-_MAINBAR_ACTIVE_STYLE = 'QPushButton {\tborder: none; background-color: transparent;}QPushButton:hover {background-color: transparent}QPushButton:pressed {\tbackground-color: rgb(75, 75, 75);}'
-_MAINBAR_INACTIVE_STYLE = 'QPushButton {\tborder: none; background-color: rgb(35, 35, 35);}QPushButton:hover {background-color: transparent}QPushButton:pressed {\tbackground-color: rgb(75, 75, 75);}'
-_LIGHT_ACTIVE_STYLE = 'QPushButton {\tborder: none;background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)} QPushButton:hover {background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)} QPushButton:pressed {\t background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)}'
-_LIGHT_INACTIVE_STYLE = 'QPushButton {\tborder: none;background-color: rgba(0,0,0, 0)} QPushButton:hover {background-color: rgba(225,225,225, 50)} QPushButton:pressed {\t background-color: rgba(225,225,225, 255);\tcolor: rgba(75,75,75,255)}'
 
 class UIFunctions(MainWindow):
 
@@ -117,25 +82,7 @@ class UIFunctions(MainWindow):
         self.ui.frame_plts.hide()
         self.ui.checkBox_fc.hide()
         self.ui.checkBox_ttest.hide()
-        # The per-feature-set "Use" checkbox (and its label) next to the colour
-        # picker is inert -- nothing in the hand-written code ever connects or
-        # reads checkBox_use1, so it does nothing. Hide both at runtime rather
-        # than editing the generated ui_main.py.
-        self.ui.checkBox_use1.hide()
-        self.ui.lbl_use.hide()
-        # "Bootstrap Analysis" and "Collapse Technical Replicates" moved
-        # from this global plot-config dialog onto their one relevant
-        # plot's own switcher bar (plot_dendrogram's "Bootstrap" checkbox,
-        # plot_ordination's "Collapse Replicates" checkbox) -- hide the
-        # now-orphaned dialog widgets rather than editing the generated
-        # ui_plotparam.py.
-        self.dialog.ui.frame_bootstrap.hide()
-        self.dialog.ui.frame_2.hide()
-        # "Apply Data Filtering" is inert (its checked state is never read and
-        # it has no signal connection), so hide it permanently rather than
-        # leaving a no-op control on the config dialog. Hidden once here; the
-        # per-tab show() that used to reveal it in reset_plotbar() is removed.
-        self.dialog.ui.checkBox_applyfilter.hide()
+        self.dialog.ui.checkBox_bootstrap.setChecked(True)
 
         # Top bar functions
         self.ui.btn_maximize.clicked.connect(lambda: UIFunctions.maximize_restore(self))
@@ -144,20 +91,24 @@ class UIFunctions(MainWindow):
 
         #mainbar functions
         self.ui.stackedWidget.setCurrentIndex(6)
-        # Simple tab buttons go through the table-driven dispatcher (keyed by
-        # _MAINBAR_TABS); 'search' additionally kicks off the db search, so it
-        # keeps its own handler. (*_a absorbs the clicked(bool) arg; k=key binds
-        # per-iteration so the closure doesn't capture the final loop value.)
-        for key in ('import', 'filter', 'params', 'plot', 'info'):
-            getattr(self.ui, _MAINBAR_TABS[key][1]).clicked.connect(
-                lambda *_a, k=key: UIFunctions.goto_maintab(self, k))
+        self.ui.btn_import.clicked.connect(lambda: UIFunctions.goto_import(self))
+        self.ui.btn_filter.clicked.connect(lambda: UIFunctions.goto_filter(self))
+        self.ui.btn_parameters.clicked.connect(lambda: UIFunctions.goto_params(self))
+        self.ui.btn_plots.clicked.connect(lambda: UIFunctions.goto_plot(self))
+        self.ui.btn_info.clicked.connect(lambda: UIFunctions.goto_info(self))
         self.ui.btn_search.clicked.connect(lambda: UIFunctions.goto_search(self))
 
         #plotbar functions
         self.ui.stackedWidget_plot.setCurrentIndex(0)
-        for key in _PLOTBAR_TABS:
-            getattr(self.ui, _PLOTBAR_TABS[key][2]).clicked.connect(
-                lambda *_a, k=key: UIFunctions.goto_plottab(self, k))
+        self.ui.btn_review.clicked.connect(lambda: UIFunctions.goto_review(self))
+        self.ui.btn_upset.clicked.connect(lambda: UIFunctions.goto_upset(self))
+        self.ui.btn_dend.clicked.connect(lambda: UIFunctions.goto_dend(self))
+        self.ui.btn_pca.clicked.connect(lambda: UIFunctions.goto_pca(self))
+        self.ui.btn_mzrt.clicked.connect(lambda: UIFunctions.goto_mzrt(self))
+        self.ui.btn_kmd.clicked.connect(lambda: UIFunctions.goto_kmd(self))
+        self.ui.btn_3dfc.clicked.connect(lambda: UIFunctions.goto_3dfc(self))
+        self.ui.btn_volcano.clicked.connect(lambda: UIFunctions.goto_volcano(self))
+        self.ui.btn_heatmap.clicked.connect(lambda: UIFunctions.goto_heatmap(self))
         
         self.ui.stackedWidget_review.setCurrentIndex(3)
         self.ui.btn_ftrplt.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(0))
@@ -165,8 +116,8 @@ class UIFunctions(MainWindow):
         self.ui.btn_cvplt.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(2))
         self.ui.btn_datasummary.clicked.connect(lambda: self.ui.stackedWidget_review.setCurrentIndex(3))
         
-        self.ui.btn_upsetplt.clicked.connect(lambda: UIFunctions.switch_grpanalysis_tab(self, 0))
-        self.ui.btn_samplecorr.clicked.connect(lambda: UIFunctions.switch_grpanalysis_tab(self, 1))
+        self.ui.btn_upsetplt.clicked.connect(lambda: self.ui.stackedWidget_grpanalysis.setCurrentIndex(0))
+        self.ui.btn_samplecorr.clicked.connect(lambda: self.ui.stackedWidget_grpanalysis.setCurrentIndex(1))
 
         #feature info bar functions
         self.ftrdialog.ui.btn_close.clicked.connect(lambda: self.ftrdialog.hide())  
@@ -205,7 +156,7 @@ class UIFunctions(MainWindow):
         self.ftrdialog.setWindowFlag(QtCore.Qt.FramelessWindowHint)
         self.ftrdialog.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
         self.ftrdialog.ui.treeWidget.hideColumn(5)
-        self.searchtree.view.hideColumn(5) #hide sets column for now
+        self.ui.treeWidget.hideColumn(5) #hide sets column for now
         self.ftrdialog.hide()
         self.ftrdialog.ui.btn_related.hide()
         
@@ -222,19 +173,35 @@ class UIFunctions(MainWindow):
 
 
     #ui buttons
-    def goto_maintab(self, key):
-        """Switch the main left-nav stacked widget to the page for ``key`` and
-        highlight its button. Data-driven via ``_MAINBAR_TABS``; replaces the
-        former one-method-per-tab goto_import/filter/params/plot/info."""
-        index, button_attr = _MAINBAR_TABS[key]
-        self.ui.stackedWidget.setCurrentIndex(index)
+    def goto_import(self):
+        self.ui.stackedWidget.setCurrentIndex(0)
         UIFunctions.reset_mainbar(self)
-        getattr(self.ui, button_attr).setStyleSheet(_MAINBAR_ACTIVE_STYLE)
+        self.ui.btn_import.setStyleSheet(self.ui.mainbar_activebtn)
+        
+    def goto_filter(self):
+        self.ui.stackedWidget.setCurrentIndex(1)
+        UIFunctions.reset_mainbar(self)
+        self.ui.btn_filter.setStyleSheet(self.ui.mainbar_activebtn)       
+        
+    def goto_params(self):
+        self.ui.stackedWidget.setCurrentIndex(2)
+        UIFunctions.reset_mainbar(self)
+        self.ui.btn_parameters.setStyleSheet(self.ui.mainbar_activebtn)
 
+    def goto_plot(self):
+        self.ui.stackedWidget.setCurrentIndex(3)
+        UIFunctions.reset_mainbar(self)
+        self.ui.btn_plots.setStyleSheet(self.ui.mainbar_activebtn)
+
+    def goto_info(self):
+        self.ui.stackedWidget.setCurrentIndex(4)
+        UIFunctions.reset_mainbar(self)
+        self.ui.btn_info.setStyleSheet(self.ui.mainbar_activebtn)
+        
     def goto_search(self):
-        """Main-nav 'Search' tab: switch like any other main tab, then run the
-        one-time NPAtlas db search + feature-tree fill once an analysis exists."""
-        UIFunctions.goto_maintab(self, 'search')
+        self.ui.stackedWidget.setCurrentIndex(5)
+        UIFunctions.reset_mainbar(self)
+        self.ui.btn_search.setStyleSheet(self.ui.mainbar_activebtn)
         #self.ftrdialog.show()
         if self.dbsearchdone == False and self.analysisrun:
             start_functime()
@@ -243,58 +210,96 @@ class UIFunctions(MainWindow):
             self.dbsearchdone = True
             stop_functime('dbsearch complete')
             reset_runtime()
-        elif not self.analysisrun:
-            self.error('Run an analysis before searching.')
-
-    def switch_grpanalysis_tab(self, idx):
-        """Switch the Group Analysis sub-tab (UpSet Plot=0, Sample
-        Correlations=1) and grey out plot_samplecorr's Method/View/Use-Names
-        controls -- shared with btn_upsetplt/btn_samplecorr in frame_12 --
-        whenever the UpSet Plot tab is active, since they don't apply there."""
-        self.ui.stackedWidget_grpanalysis.setCurrentIndex(idx)
-        if getattr(self, 'samplecorr', None) is not None:
-            self.samplecorr.set_controls_enabled(idx == 1)
-
+            
     #plotbar functions
-    def goto_plottab(self, key):
-        """Switch the plots area (infobar + plot stacked widgets) to the page
-        for ``key``, highlight its button, and apply that tab's dialog-frame
-        show/hide deltas. Data-driven via ``_PLOTBAR_TABS``; replaces the former
-        one-method-per-tab goto_review/upset/dend/pca/mzrt/kmd/3dfc/volcano/
-        heatmap. Order matches the originals: set pages -> reset bar (which
-        hides every per-tab frame) -> mark the active button -> apply this
-        tab's frame deltas on top."""
-        infobar_index, plot_index, button_attr, frame_ops = _PLOTBAR_TABS[key]
-        self.ui.stackedWidget_infobar.setCurrentIndex(infobar_index)
-        self.ui.stackedWidget_plot.setCurrentIndex(plot_index)
+    def goto_review(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(0)
+        self.ui.stackedWidget_plot.setCurrentIndex(1)
         UIFunctions.reset_plotbar(self)
-        getattr(self.ui, button_attr).setStyleSheet(_LIGHT_ACTIVE_STYLE)
-        for action, widget_attr in frame_ops:
-            getattr(getattr(self.dialog.ui, widget_attr), action)()
+        self.ui.btn_review.setStyleSheet(self.ui.plotbar_activebtn)
+        
+        self.dialog.ui.checkBox_applyfilter.hide()
 
+    def goto_upset(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(1)
+        self.ui.stackedWidget_plot.setCurrentIndex(9)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_upset.setStyleSheet(self.ui.plotbar_activebtn)
+        
+        self.dialog.ui.checkBox_applyfilter.hide()
+        self.dialog.ui.frame_colorscheme.show()
+        
+    def goto_dend(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(1)
+        self.ui.stackedWidget_plot.setCurrentIndex(2)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_dend.setStyleSheet(self.ui.plotbar_activebtn)
+        
+    def goto_pca(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(1)
+        self.ui.stackedWidget_plot.setCurrentIndex(3)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_pca.setStyleSheet(self.ui.plotbar_activebtn)
+        
+        self.dialog.ui.frame_2.show()
+
+    def goto_mzrt(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(0)
+        self.ui.stackedWidget_plot.setCurrentIndex(4)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_mzrt.setStyleSheet(self.ui.plotbar_activebtn)
+        
+    def goto_kmd(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(0)
+        self.ui.stackedWidget_plot.setCurrentIndex(5)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_kmd.setStyleSheet(self.ui.plotbar_activebtn)
+        
+        self.dialog.ui.frame_mdguide.show()
+        
+    def goto_3dfc(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(0)
+        self.ui.stackedWidget_plot.setCurrentIndex(6)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_3dfc.setStyleSheet(self.ui.plotbar_activebtn)
+        
+    def goto_volcano(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(0)
+        self.ui.stackedWidget_plot.setCurrentIndex(7)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_volcano.setStyleSheet(self.ui.plotbar_activebtn)
+        
+        self.dialog.ui.frame_volcanoparams.show()
+
+    def goto_heatmap(self):
+        self.ui.stackedWidget_infobar.setCurrentIndex(0)
+        self.ui.stackedWidget_plot.setCurrentIndex(8)
+        UIFunctions.reset_plotbar(self)
+        self.ui.btn_heatmap.setStyleSheet(self.ui.plotbar_activebtn)
+
+        self.dialog.ui.frame_colorscheme.show()
+        
     #ftinfobar functions
     def goto_abund(self):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(2)
-        # Refresh (not re-select/toggle) the current feature's display now
-        # that the abundance tab is active.
-        self._refresh_highlight()
+        self.highlight_feature(self.pickedfeature)
         UIFunctions.reset_ftrdialogbar(self)
-        self.ftrdialog.ui.btn_abund.setStyleSheet(_LIGHT_ACTIVE_STYLE)
-
+        self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_activebtn)
+        
     def goto_hits(self):
         self.ftrdialog.ui.btn_masst.hide()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(0)
-
-        self._refresh_highlight()
+        
+        self.highlight_feature(self.pickedfeature)
         UIFunctions.reset_ftrdialogbar(self)
-        self.ftrdialog.ui.btn_hits.setStyleSheet(_LIGHT_ACTIVE_STYLE)
+        self.ftrdialog.ui.btn_hits.setStyleSheet(self.ui.ftbar_activebtn)
         
     def goto_spectrum(self):
         self.ftrdialog.ui.btn_masst.show()
         self.ftrdialog.ui.stackedWidget.setCurrentIndex(1)
         UIFunctions.reset_ftrdialogbar(self)
-        self.ftrdialog.ui.btn_spectrum.setStyleSheet(_LIGHT_ACTIVE_STYLE)
+        self.ftrdialog.ui.btn_spectrum.setStyleSheet(self.ui.ftbar_activebtn)
 
     def masst(self): 
         """
@@ -325,228 +330,171 @@ class UIFunctions(MainWindow):
     #colour buttons
     def colour_picker1(self):
         """
-        Allows user to pick a color from color dialog and sets the selected
-        groupset's colour attribute.
+        Allows user to pick a color from color dialog and sets the selected color to the selected query set's color attribute.
+
         """
         color = QColorDialog.getColor()
-        self.groupsetmodel.update(self.groupsetmodel.selected_index, colour=color.name())
-        self.ui.btn_col1.setStyleSheet("QPushButton {border: 2px solid lightgrey; background-color: " + str(self.groupsetmodel.selected.colour) +";}")
-
+        self.querys[self.selset].colour = color.name() 
+        self.ui.btn_col1.setStyleSheet("QPushButton {border: 2px solid lightgrey; background-color: " + str(self.querys[self.selset].colour) +";}")
+    
     def updatesets(self):
         """
-        Rebuilds the groupset list widget from the model and restores selection.
+        Updates the list of query sets in the GUI and sets the selected query set.
+
         """
-        list_widget = self.ui.listWidget_pltgrps
-
-        # Block signals while rebuilding: clear()/addItem()/setCurrentRow()
-        # below all fire currentItemChanged, which is wired to writegroups()
-        # (ui_functions.py:148) -- a GUI-to-model sync that would otherwise
-        # run mid-rebuild, before the drag-list boxes are refreshed for the
-        # new selection, and clobber the model with stale leftover box
-        # contents from whatever groupset was selected a moment earlier.
-        list_widget.blockSignals(True)
-        list_widget.clear()
-        for groupset in self.groupsetmodel:
-            item = QListWidgetItem(groupset.name)
+        selitem = self.ui.listWidget_pltgrps.currentRow() - 1
+        selitem = max(selitem, 0)
+        
+        self.ui.listWidget_pltgrps.clear()
+        for query in self.querys:
+            item = QListWidgetItem(query.name)
             item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
-            list_widget.addItem(item)
-
-        # Trust the model's own selected_index (already correctly maintained
-        # by add()/remove()/from_legacy_list()) rather than re-deriving a
-        # guess from the widget's currentRow() before it's cleared above --
-        # that previously read the stale pre-rebuild row and shifted it by
-        # one, so live selection drifted toward row 0 on every remove/load.
-        list_widget.setCurrentRow(self.groupsetmodel.selected_index)
-        list_widget.blockSignals(False)
-
+            self.ui.listWidget_pltgrps.addItem(item)
+    
+        self.ui.listWidget_pltgrps.setCurrentRow(selitem)
         UIFunctions.updategroups(self)
-
-
+        
+    
     def updategroups(self):
         """
-        Syncs the three group-membership lists (and colour swatch) in the GUI
-        to the currently-selected groupset in the model.
+        Updates the lists of groups for the selected query set in the GUI.
         """
-        # select() also sets the model's selected_index (side effect we rely on);
-        # its return value is unused here.
-        self.groupsetmodel.select(self.ui.listWidget_pltgrps.currentRow())
-
+        selgroup = self.ui.listWidget_pltgrps.currentRow()
+        self.selset = selgroup
+    
         self.ui.listWidget_allgrps.clear()
         self.ui.listWidget_orgrps.clear()
         self.ui.listWidget_andgrps.clear()
-
-        groupset = self.groupsetmodel.selected
-        if groupset is None:
-            return
-
-        for group in groupset.excl:
+    
+        for group in self.querys[selgroup].excl:
             self.ui.listWidget_allgrps.addItem(QListWidgetItem(group))
-        for group in groupset.src:
+        for group in self.querys[selgroup].src:
             self.ui.listWidget_orgrps.addItem(QListWidgetItem(group))
-        for group in groupset.incl:
+        for group in self.querys[selgroup].incl:
             self.ui.listWidget_andgrps.addItem(QListWidgetItem(group))
-
+    
         self.ui.btn_col1.setStyleSheet(
-            "QPushButton {border: 2px solid lightgrey; background-color: " +
-            str(groupset.colour) +";}"
+            "QPushButton {border: 2px solid lightgrey; background-color: " + 
+            str(self.querys[self.selset].colour) +";}"
         )
-
+    
     def writegroups(self):
         """
-        Writes the GUI's groupset name/included/excluded/source-group widgets
-        back into the model for the currently-selected groupset.
+        Writes the changes made to the query set's name, included groups, excluded groups, and source groups in the GUI to the query object.
         """
-        selset = self.groupsetmodel.selected_index
-        if 0 <= selset < self.ui.listWidget_pltgrps.count():
+        if 0 <= self.selset < self.ui.listWidget_pltgrps.count():
             try:
-                name = self.ui.listWidget_pltgrps.item(selset).text()
+                self.querys[self.selset].name = self.ui.listWidget_pltgrps.item(self.selset).text()
             except Exception:
-                name = None
-
-            self.groupsetmodel.update(
-                selset,
-                name=name,
-                excl=[self.ui.listWidget_allgrps.item(x).text() for x in range(self.ui.listWidget_allgrps.count())],
-                src=[self.ui.listWidget_orgrps.item(x).text() for x in range(self.ui.listWidget_orgrps.count())],
-                incl=[self.ui.listWidget_andgrps.item(x).text() for x in range(self.ui.listWidget_andgrps.count())],
-            )
-
+                pass
+    
+            self.querys[self.selset].excl = [self.ui.listWidget_allgrps.item(x).text() for x in range(self.ui.listWidget_allgrps.count())]
+            self.querys[self.selset].src = [self.ui.listWidget_orgrps.item(x).text() for x in range(self.ui.listWidget_orgrps.count())]
+            self.querys[self.selset].incl = [self.ui.listWidget_andgrps.item(x).text() for x in range(self.ui.listWidget_andgrps.count())]
+    
         UIFunctions.updategroups(self)
-
-
+        
+        
     def addgroup(self, name = 'New Feature Set'):
         """
-        Adds a new groupset (excluding every known biological group by
-        default) to the model and the GUI list.
+        Adds a new query set to the list of query sets in the GUI and to the querys list.
         """
         item = QListWidgetItem(name)
         item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+        
+        self.ui.listWidget_pltgrps.addItem(item)
+        item.setSelected(True)
+        
+        currquery = query()
+        currquery.name = item.text()
+        currquery.src = []
+        currquery.incl = []
+        currquery.excl = []
+        currquery.color = '#000000'
+        
+        for group in self.groups:
+            currquery.excl.append(group)
+            
+        self.querys.append(currquery)
+        self.ui.listWidget_pltgrps.setCurrentItem(item)
 
-        list_widget = self.ui.listWidget_pltgrps
-
-        # Block signals for the same reason as updatesets(): setCurrentItem()
-        # below fires currentItemChanged -> writegroups(), which would write
-        # whatever's currently in the (stale, belonging to the previously
-        # selected groupset) drag-list boxes into this brand-new groupset's
-        # slot instead of leaving its real (exclude-everything) default data
-        # in place. Update the model first, then sync the GUI from it
-        # ourselves via updategroups(), rather than relying on the signal.
-        list_widget.blockSignals(True)
-        list_widget.addItem(item)
-        self.groupsetmodel.add(item.text(), all_groups=self.groups)
-        list_widget.setCurrentItem(item)
-        list_widget.blockSignals(False)
-
-        UIFunctions.updategroups(self)
-
-
+            
     def removegroup(self):
         """
-        Removes the selected groupset from the model and the GUI list.
+        Removes the selected query set from the list of query sets in the GUI and from the querys list.
         """
-        self.groupsetmodel.remove(self.ui.listWidget_pltgrps.currentRow())
+        selitem = self.ui.listWidget_pltgrps.currentRow()
+        self.querys.remove(self.querys[selitem])
         UIFunctions.updatesets(self)
         
         
         
     #import buttons
     def loadsession(self):
-        """Open a saved ``.mpct`` session and restore every input/parameter widget.
-
-        Opening the file is fatal if it fails, but each parameter is then
-        restored independently so a single missing/renamed field (e.g. from an
-        older save file) cannot silently abort restoration of the rest. The
-        previous implementation wrapped the whole body in ``try/except: pass``,
-        so the first failing widget (notably ``combo_maxisoshift``, which was
-        being given a float index that raises ``TypeError`` in PyQt5) left every
-        later parameter un-restored.
-        """
-        savefile, _ = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir, "*.mpct")
-        if not savefile:
-            return
-        self.savefile = Path(savefile)
-        self.recentdir = str(self.savefile.parent)
-        try:
-            self.read_save(self.savefile)
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            self.error('Could not open session file (see console)')
-            return
-
-        p = self.analysis_paramsgui
-
-        def restore(what, action):
+            """
+            Displays a file dialog to get the saved session file, calls the `read_save` method in `main.py` to read the saved 
+            data and updates the UI elements with the saved parameters.
+            """
             try:
-                action()
-            except Exception as exc:
-                print('Warning: could not restore ' + what + ': ' + str(exc))
+                self.savefile, _  = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir , 
+                                                                               "*.mpct")
+                self.savefile = Path(self.savefile)
+                self.recentdir = str(self.savefile.parent)
+                self.read_save(self.savefile)
+                
+                self.ui.lbl_pktbl.setText(self.filename.name)
+                self.ui.lbl_spllist.setText(self.samplelistfilename.name)
+                self.ui.lbl_splmdt.setText(self.extractmetadatafilename.name)
+                self.ui.lbl_msp.setText(self.fragfilename.name)
+                if len(str(self.outputdir)) <40:
+                    self.ui.lbl_outdir.setText(self.outputdir)
+                else:
+                    self.ui.lbl_outdir.setText('...' + str(self.outputdir)[-40:])
+                
+                self.ui.checkBox_cv.setChecked('cv' in self.analysis_paramsgui.graphfilters) # may be good to add seperate parameters for each filter instead of using str?
+                self.ui.radioButton_meancv.setChecked('average' in self.analysis_paramsgui.cvparam)
+                self.ui.radioButton_medcv.setChecked('median' in self.analysis_paramsgui.cvparam)
+                self.ui.lineEdit_cvthresh.setText(str(self.analysis_paramsgui.cvthresh))
+                self.ui.checkBox_mp.setChecked('rel' in self.analysis_paramsgui.graphfilters)
+                self.ui.lineEdit_rtwin.setText(str(self.analysis_paramsgui.RTwin))
+                self.ui.lineEdit_isowin.setText(str(self.analysis_paramsgui.isopeakwin))
+                self.ui.combo_maxisoshift.setCurrentIndex(self.analysis_paramsgui.maxisowin)
+                self.ui.checkBox_decon.setChecked('insource' in self.analysis_paramsgui.graphfilters)
+                self.ui.lineEdit_insourcethresh.setText(str(self.analysis_paramsgui.deconthresh))
+                self.ui.checkBox_blankfilter.setChecked(self.analysis_paramsgui.blnkfltr)
+                self.ui.combo_blankfil_name.setCurrentText(str(self.analysis_paramsgui.blnkgrp))
+                self.ui.radioButton_meancv.setChecked('average' in self.analysis_paramsgui.cvparam)
+                if 'absolute' in self.analysis_paramsgui.blankfilparam:
+                    self.ui.lineEdit_blankfilter_absthresh.setText(str(self.analysis_paramsgui.blankfilthresh))
+                    self.ui.radioButton_blankfilter_abs.setChecked(True)
+                else:
+                    self.ui.lineEdit_blankfilter_relthresh.setText(str(self.analysis_paramsgui.blankfilthresh))
+                    self.ui.radioButton_blankfilter_rel.setChecked(True)
+                
 
-        def set_maxiso():
-            # maxisowin is stored as a float (e.g. 3.0); map it to the matching
-            # combo item by text rather than passing a float as an index.
-            combo = self.ui.combo_maxisoshift
-            for cand in (str(int(p.maxisowin)), str(p.maxisowin)):
-                idx = combo.findText(cand)
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
-                    return
-
-        def set_blankfil():
-            if 'absolute' in p.blankfilparam:
-                self.ui.lineEdit_blankfilter_absthresh.setText(str(p.blankfilthresh))
-                self.ui.radioButton_blankfilter_abs.setChecked(True)
-            else:
-                self.ui.lineEdit_blankfilter_relthresh.setText(str(p.blankfilthresh))
-                self.ui.radioButton_blankfilter_rel.setChecked(True)
-
-        # ----- input file path labels -----
-        restore('peak table label', lambda: self.ui.lbl_pktbl.setText(self.filename.name))
-        restore('sample list label', lambda: self.ui.lbl_spllist.setText(self.samplelistfilename.name))
-        restore('metadata label', lambda: self.ui.lbl_splmdt.setText(self.extractmetadatafilename.name))
-        restore('fragment file label', lambda: self.ui.lbl_msp.setText(Path(self.fragfilename).name if self.fragfilename else ''))
-        restore('output dir label', lambda: self.ui.lbl_outdir.setText(
-            str(self.outputdir) if len(str(self.outputdir)) < 40 else '...' + str(self.outputdir)[-40:]))
-
-        # ----- filtering parameters -----
-        restore('CV filter', lambda: self.ui.checkBox_cv.setChecked('cv' in p.graphfilters))
-        restore('mean CV radio', lambda: self.ui.radioButton_meancv.setChecked('average' in p.cvparam))
-        restore('median CV radio', lambda: self.ui.radioButton_medcv.setChecked('median' in p.cvparam))
-        restore('CV threshold', lambda: self.ui.lineEdit_cvthresh.setText(str(p.cvthresh)))
-        restore('mispick filter', lambda: self.ui.checkBox_mp.setChecked('rel' in p.graphfilters))
-        restore('merge ions', lambda: self.ui.checkBox_merge.setChecked(getattr(p, 'merge', False)))
-        restore('RT window', lambda: self.ui.lineEdit_rtwin.setText(str(p.RTwin)))
-        restore('ringing window', lambda: self.ui.lineEdit_ringwin.setText(str(getattr(p, 'ringingwin', ''))))
-        restore('isotope window', lambda: self.ui.lineEdit_isowin.setText(str(p.isopeakwin)))
-        restore('max isotope shift', set_maxiso)
-        restore('deconvolution filter', lambda: self.ui.checkBox_decon.setChecked('insource' in p.graphfilters))
-        restore('deconvolution threshold', lambda: self.ui.lineEdit_insourcethresh.setText(str(getattr(p, 'deconthresh', ''))))
-
-        # ----- blank filter -----
-        restore('blank filter', lambda: self.ui.checkBox_blankfilter.setChecked(p.blnkfltr))
-        restore('blank group', lambda: self.ui.combo_blankfil_name.setCurrentText(str(p.blnkgrp)))
-        restore('blank filter mode', set_blankfil)
-
-        # ----- database search -----
-        restore('kingdom', lambda: self.ui.combo_kingdom.setCurrentText(str(getattr(p, 'kingdom', ''))))
-        restore('genus', lambda: self.ui.lineEdit_genus.setText(str(getattr(p, 'genus', ''))))
-        restore('ppm threshold', lambda: self.ui.lineEdit_ppmthresh.setText(str(getattr(p, 'ppmthresh', ''))))
-
-        # ----- plot toggles -----
-        # Plain 1:1 checkbox fields (no branching/derived values) -- see
-        # paramfields.py for the shared save/restore schema; the matching
-        # save side is enumerate_inputs()'s save_checkbox_fields() call.
-        restore_checkbox_fields(self, p, restore)
-
-        # ----- statistics / plot params -----
-        restore('experimental group', lambda: self.ui.combo_expgrp.setCurrentText(str(p.statstgrps[0])))
-        restore('control group', lambda: self.ui.combo_ctrgrp.setCurrentText(str(p.statstgrps[1])))
-        # colour scheme / p/q threshold / fold-change threshold are no longer
-        # restored here -- they moved to the heatmap & volcano plots' own live
-        # control bars and are intentionally not persisted (same as the
-        # dendrogram's per-plot controls). Old .mpct files that still carry these
-        # values simply ignore them on load.
-
+                self.ui.checkBox_pca.setChecked(self.analysis_paramsgui.PCA)
+                self.ui.checkBox_dend.setChecked(self.analysis_paramsgui.Dendrogram)
+                self.ui.checkBox_mzrt.setChecked(self.analysis_paramsgui.MZRTplt)
+                self.ui.checkBox_kmd.setChecked(self.analysis_paramsgui.KMD)
+                self.ui.checkBox_fc.setChecked(self.analysis_paramsgui.FC)
+                self.ui.checkBox_3dfc.setChecked(self.analysis_paramsgui.FC3Dplt)
+                self.ui.checkBox_ttest.setChecked(self.analysis_paramsgui.Ttest)
+                self.ui.checkBox_volcano.setChecked(self.analysis_paramsgui.Volcanoplt)
+                
+                self.ui.checkBox_FDR.setChecked(self.analysis_paramsgui.FDR)
+                self.dialog.ui.checkBox_bootstrap.setChecked(self.analysis_paramsgui.bootstrap)
+                self.ui.combo_expgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[0]))
+                self.ui.combo_ctrgrp.setCurrentText(str(self.analysis_paramsgui.statstgrps[1]))
+                
+                self.dialog.ui.combo_colorscheme.setCurrentText(self.analysis_paramsgui.colorscheme)
+                self.dialog.ui.lineEdit_pqthresh.setText(str(self.analysis_paramsgui.pqthresh))
+                self.dialog.ui.lineEdit_fcthresh.setText(str(self.analysis_paramsgui.fcthresh))
+                self.dialog.ui.checkBox_mdguide.setChecked(self.analysis_paramsgui.mdguide)
+            except Exception:
+               #self.error('Files in use, Close before analysis')
+               pass
+               return()
+                
     def getfilename(self):
             self.filename, _  = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir ,
                                                                            "*.csv *.txt")
@@ -576,19 +524,17 @@ class UIFunctions(MainWindow):
                 self.getgroups() 
                 
     def getoutputdir(self):
-            selected = QFileDialog.getExistingDirectory(self, 'Select Directory', self.recentdir)
-            if not selected:
-                # Dialog cancelled -- leave the previously-selected output dir
-                # (and recentdir) untouched rather than clobbering them.
-                self.error('No directory selected')
-                return
-            self.outputdir = Path(selected)
+            self.outputdir = Path(str(QFileDialog.getExistingDirectory(self, 'Select Directory', self.recentdir)))
             self.recentdir = str(self.outputdir)
-            # setText needs a str (passing a Path raises); show the full path
-            # when short, otherwise truncate from the left so the informative
-            # tail stays visible.
-            shown = str(self.outputdir)
-            self.ui.lbl_outdir.setText(shown if len(shown) < 40 else '...' + shown[-40:])
+            if len(str(self.outputdir)) <40:
+                try:
+                    self.ui.lbl_outdir.setText(self.outputdir)
+                except Exception:
+                    self.error('No directory selected')
+                    pass
+                    return()
+            else:
+                self.ui.lbl_outdir.setText('...' + str(self.outputdir)[-40:])
 
     def getfragfilename(self):
             self.fragfilename, _ = QFileDialog.getOpenFileName(self, 'Open file', self.recentdir,
@@ -607,40 +553,47 @@ class UIFunctions(MainWindow):
 
     #reset uibar buttons
     def reset_mainbar(self):
-        self.ui.btn_import.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
-        self.ui.btn_filter.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
-        self.ui.btn_parameters.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
-        self.ui.btn_plots.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
-        self.ui.btn_info.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
-        self.ui.btn_search.setStyleSheet(_MAINBAR_INACTIVE_STYLE)
+        self.ui.mainbar_activebtn = "QPushButton {	border: none; background-color: transparent;}QPushButton:hover {background-color: transparent}QPushButton:pressed {	background-color: rgb(75, 75, 75);}"
+        self.ui.mainbar_inactivebtn ="QPushButton {	border: none; background-color: rgb(35, 35, 35);}QPushButton:hover {background-color: transparent}QPushButton:pressed {	background-color: rgb(75, 75, 75);}"
+        self.ui.btn_import.setStyleSheet(self.ui.mainbar_inactivebtn)
+        self.ui.btn_filter.setStyleSheet(self.ui.mainbar_inactivebtn)
+        self.ui.btn_parameters.setStyleSheet(self.ui.mainbar_inactivebtn)
+        self.ui.btn_plots.setStyleSheet(self.ui.mainbar_inactivebtn)
+        self.ui.btn_info.setStyleSheet(self.ui.mainbar_inactivebtn)
+        self.ui.btn_search.setStyleSheet(self.ui.mainbar_inactivebtn)
         self.ui.label_status.setText('') #to reset analysis status after tabs are switched. eventually use a second thread to dynamically update status
         self.ui.label_status.setStyleSheet('color: rgb(150,150,150);')
         
     def reset_plotbar(self):
-        self.ui.btn_review.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_dend.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_upset.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_pca.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_mzrt.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_kmd.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_3dfc.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_volcano.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ui.btn_heatmap.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.plotbar_activebtn = "QPushButton {	border: none;background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:hover {background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
+        self.ui.plotbar_inactivebtn ="QPushButton {	border: none;background-color: rgba(0,0,0, 0)} QPushButton:hover {background-color: rgba(225,225,225, 50)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
+        self.ui.btn_review.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_dend.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_upset.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_pca.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_mzrt.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_kmd.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_3dfc.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_volcano.setStyleSheet(self.ui.plotbar_inactivebtn)
+        self.ui.btn_heatmap.setStyleSheet(self.ui.plotbar_inactivebtn)
         
         self.dialog.ui.frame_2.hide()
         self.dialog.ui.frame.hide() #hide apply button, button doesnt work right now, use run button
         self.dialog.ui.frame_mdguide.hide()
         self.dialog.ui.frame_volcanoparams.hide()
         self.dialog.ui.frame_colorscheme.hide()
+        self.dialog.ui.checkBox_applyfilter.show()
         self.ui.label_status.setText('')
 
     def reset_ftrdialogbar(self):
-        self.ftrdialog.ui.btn_hits.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ftrdialog.ui.btn_spectrum.setStyleSheet(_LIGHT_INACTIVE_STYLE)
-        self.ftrdialog.ui.btn_abund.setStyleSheet(_LIGHT_INACTIVE_STYLE)
+        self.ui.ftbar_activebtn = "QPushButton {border: none;background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:hover {background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
+        self.ui.ftbar_inactivebtn ="QPushButton {border: none;background-color: rgba(0,0,0,0)} QPushButton:hover {background-color: rgba(225,225,225, 50)} QPushButton:pressed {	 background-color: rgba(225,225,225, 255);	color: rgba(75,75,75,255)}"
+        self.ftrdialog.ui.btn_hits.setStyleSheet(self.ui.ftbar_inactivebtn)
+        self.ftrdialog.ui.btn_spectrum.setStyleSheet(self.ui.ftbar_inactivebtn)
+        self.ftrdialog.ui.btn_abund.setStyleSheet(self.ui.ftbar_inactivebtn)
     
     def show_ftrdialog(self):
         self.ftrdialog.show()
         if self.pickedfeature != '':
-            self._refresh_highlight()
+            self.highlight_feature(self.pickedfeature)
 
