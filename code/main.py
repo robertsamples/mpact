@@ -1400,6 +1400,67 @@ class MainWindow(QMainWindow):
     
         self.analysis_paramsgui.statstgrps = [str(self.ui.combo_expgrp.currentText()), str(self.ui.combo_ctrgrp.currentText())]
         self.analysis_paramsgui.cvthresh = float(self.ui.lineEdit_cvthresh.text())
+
+        # ============ 新增:读取加合物归组配置文件 adduct_config.txt ============
+        # 该文件与main.py同目录,用记事本编辑即可。控制:是否开启加合物/中性丢失归组、离子模式、离子形式列表。
+        # English: reads adduct_config.txt (next to main.py), which switches on the beta
+        # filters. Everything stays off, and peak correction stays on the published
+        # algorithm, unless that file says otherwise.
+        import os as _os
+        _cfg_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'adduct_config.txt')
+        self.analysis_paramsgui.adductgrp = False
+        self.analysis_paramsgui.mdfil = False
+        self.analysis_paramsgui.md_halogen = False
+        self.analysis_paramsgui.relfil_mode = 'legacy'
+        self.analysis_paramsgui.adduct_list = None
+        self.analysis_paramsgui.adduct_mode = 'pos'
+        self.analysis_paramsgui.adduct_ppm = 3.0
+        self.analysis_paramsgui.corr_cut = 0.75
+        self.analysis_paramsgui.corr_p = 0.05
+        if _os.path.exists(_cfg_path):
+            _adducts = []
+            try:
+                with open(_cfg_path, 'r', encoding='utf-8') as _f:
+                    for _line in _f:
+                        _line = _line.strip()
+                        if (not _line) or _line.startswith('#'):
+                            continue
+                        if '=' in _line and ',' not in _line:
+                            _k, _v = [x.strip() for x in _line.split('=', 1)]
+                            if _k.lower() == 'enable':
+                                self.analysis_paramsgui.adductgrp = (_v.lower() in ('true', '1', 'yes', 'on'))
+                            elif _k.lower() == 'ppm':
+                                self.analysis_paramsgui.adduct_ppm = float(_v)
+                            elif _k.lower() == 'corr_cut':
+                                self.analysis_paramsgui.corr_cut = float(_v)
+                            elif _k.lower() == 'corr_p':
+                                self.analysis_paramsgui.corr_p = float(_v)
+                            elif _k.lower() == 'mass_defect':
+                                self.analysis_paramsgui.mdfil = (_v.lower() in ('true','1','yes','on'))
+                            elif _k.lower() == 'md_halogen':
+                                self.analysis_paramsgui.md_halogen = (_v.lower() in ('true','1','yes','on'))
+                            elif _k.lower() == 'mode':
+                                # 离子模式:决定基准离子形式([M+H]+ / [M-H]-)
+                                self.analysis_paramsgui.adduct_mode = _v.strip().lower()
+                            elif _k.lower() == 'peak_correction':
+                                self.analysis_paramsgui.relfil_mode = 'beta' if _v.strip().lower() == 'beta' else 'legacy'
+                        elif ',' in _line:
+                            _parts = [x.strip() for x in _line.split(',')]
+                            if len(_parts) >= 2:
+                                try:
+                                    _adducts.append((_parts[0], float(_parts[1])))
+                                except ValueError:
+                                    pass
+                if _adducts:
+                    self.analysis_paramsgui.adduct_list = _adducts
+                print('adduct_config.txt loaded: mode=%s, adduct=%s, mass_defect=%s, peak_correction=%s, %d ion forms, ppm=%s' %
+                      (self.analysis_paramsgui.adduct_mode, self.analysis_paramsgui.adductgrp, self.analysis_paramsgui.mdfil,
+                       self.analysis_paramsgui.relfil_mode, len(_adducts), self.analysis_paramsgui.adduct_ppm))
+            except Exception as _e:
+                print('Warning: failed to read adduct_config.txt:', _e)
+        else:
+            print('adduct_config.txt not found; beta features disabled.')
+        # ============ 新增结束 ============
         if self.ui.radioButton_meancv.isChecked():
             self.analysis_paramsgui.cvparam = 'average CV'
         else:
