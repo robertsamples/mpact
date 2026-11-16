@@ -68,7 +68,7 @@ def test_run_msfast_with_grpave_off_does_not_raise(tmp_path):
     assert isinstance(result, AnalysisResult)
     assert isinstance(result.groupionlists, dict)
     # The filter keys are always added, each empty since every filter is off.
-    assert result.groupionlists == {'cv': [], 'relfil': [], 'insource': [], 'adduct': []}
+    assert result.groupionlists == {'cv': [], 'relfil': [], 'insource': [], 'adduct': [], 'massdefect': []}
     # With no filters applied, the filtered table is written and analysisinfo exists.
     assert (params.outputdir / (params.filename.stem + '_filtered.csv')).exists()
     assert (params.outputdir / 'analysisinfo.txt').exists()

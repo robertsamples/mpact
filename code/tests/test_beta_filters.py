@@ -20,8 +20,8 @@ from test_msfast_pipeline import make_params
 
 RISING = [100.0, 200.0, 300.0, 400.0, 500.0, 600.0]
 SHUFFLED = [600.0, 100.0, 500.0, 200.0, 400.0, 300.0]   # uncorrelated with RISING
-NA_DELTA = 22.989770 - 1.007276
-K_DELTA = 38.963707 - 1.007276
+NA_DELTA = 22.989218 - 1.007276     # [M+Na]+ - [M+H]+
+K_DELTA = 38.963158 - 1.007276      # [M+K]+ - [M+H]+
 C13 = 1.0033548
 
 
@@ -99,6 +99,17 @@ def test_adductgroup_needs_mass_rt_and_correlation(tmp_path, ids):
     assert attribution['is_main'].fillna('').tolist() == ['main', '']
 
 
+def test_default_sodium_and_potassium_deltas_are_ion_masses(tmp_path):
+    # At 1 ppm the neutral-atom masses the defaults once used (0.00055 Da high)
+    # miss both of these.
+    params = write_tables(tmp_path, [('base', 300.1000, 5.0, RISING),
+                                     ('sodium', 300.1000 + NA_DELTA, 5.0, scaled(RISING, 0.3)),
+                                     ('potassium', 300.1000 + K_DELTA, 5.0, scaled(RISING, 0.2))])
+    params.adduct_mode = 'pos'
+    params.adduct_ppm = 1.0
+    assert filter.adductgroup(params) == {'sodium', 'potassium'}
+
+
 def test_adductgroup_keeps_the_most_abundant_member(tmp_path):
     params = write_tables(tmp_path, [('weak_base', 300.1000, 5.0, RISING),
                                      ('strong_sodium', 300.1000 + NA_DELTA, 5.0, scaled(RISING, 4))])
@@ -162,3 +173,32 @@ def test_pipeline_runs_with_every_beta_feature_on(tmp_path):
                            header=[0, 1, 2], index_col=[0, 1, 2])
     survivors = set(filtered.index.get_level_values(0).astype(str))
     assert survivors and not survivors & set(map(str, result.ionfilters['massdefect'].ions))
+
+
+def test_mass_defect_filter_runs_without_peak_correction(tmp_path):
+    params = make_params(tmp_path)
+    params.relfil = False
+    params.merge = False
+    params.mdfil = True
+
+    result = run_MSFaST(params)
+
+    assert 'relfil' not in result.ionfilters
+    assert len(result.ionfilters['massdefect'].ions) > 0
+    assert result.groupionlists['massdefect'] == result.ionfilters['massdefect'].ions
+
+
+def test_beta_removed_features_are_in_no_plot_feature_set(tmp_path):
+    params = make_params(tmp_path)
+    params.mdfil = True
+    params.adductgrp = True
+    params.adduct_mode = 'pos'
+
+    result = run_MSFaST(params)
+
+    removed = set(map(str, result.ionfilters['massdefect'].ions)) | set(map(str, result.ionfilters['adduct'].ions))
+    plotted = {str(ion) for groupset in result.groupsets.values() for ion in groupset.ionlist}
+    assert removed and plotted and not removed & plotted
+    info = (params.outputdir / 'analysisinfo.txt').read_text()
+    assert 'Features failing mass defect filtering: ' in info
+    assert 'Features removed by adduct grouping: ' in info

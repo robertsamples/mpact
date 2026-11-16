@@ -573,12 +573,15 @@ def adductgroup(analysis_params, adduct_list=None):
     corr_cut = getattr(analysis_params, 'corr_cut', 0.75)
     corr_p   = getattr(analysis_params, 'corr_p', 0.05)
 
-    H=1.007276; Na=22.989770; K=38.963707; NH4=18.033823; H2O=18.010565
+    # Ion masses (the atom less one electron), like H and NH4: Na and K were the
+    # neutral atoms' masses, which put both deltas 0.00055 Da (about 1 ppm at
+    # m/z 500) too high.
+    H=1.007276; Na=22.989218; K=38.963158; NH4=18.033823; H2O=18.010565
     if adduct_list is None:
         # 默认正离子(用户可传自己勾选的). 相对 M+H 的质量差:
         adduct_list = [
-            ('M+Na',     Na - H),     # +21.982
-            ('M+K',      K - H),      # +37.956
+            ('M+Na',     Na - H),     # +21.9819
+            ('M+K',      K - H),      # +37.9559
             ('M+NH4',    NH4 - H),    # +17.027
             ('M-H2O+H',  -H2O),       # -18.011 (在源丢1水)
             ('M-H4O2+H', -2*H2O),     # -36.021 (在源丢2水)
