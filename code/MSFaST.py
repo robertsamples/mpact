@@ -193,6 +193,9 @@ def run_MSFaST(params):
     # The GUI currently forces grpave=True, but loaded sessions/tests need not.
     groupionlists = {}
     if analysis_params.relfil:
+        # 质量亏损过滤(在relfil/decon之前,先清掉化学上不可能的噪声离子)
+        if getattr(analysis_params, 'mdfil', False):
+            ionfilters = filter.mdfilter(analysis_params, ionfilters)
         ionfilters = filter.relationalfilter(analysis_params, ionfilters)
         if analysis_params.merge:
             filter.mergeions(analysis_params, ionfilters)
@@ -212,6 +215,9 @@ def run_MSFaST(params):
         ionfilters = filter.cvfilter(analysis_params, ionfilters, analysis_params.cvthresh)
     if analysis_params.decon:
         ionfilters = filter.decon(analysis_params, ionfilters)
+    if getattr(analysis_params, 'adductgrp', False):   # 新增:加合物/在源裂解/二聚体归组
+        adduct_removed = filter.adductgroup(analysis_params, getattr(analysis_params, 'adduct_list', None))
+        ionfilters['adduct'] = filter.ionfilter('', list(adduct_removed))
     filter.applyfilters(analysis_params, ionfilters)
     if analysis_params.prperr:
         stats.properr(analysis_params)
@@ -220,6 +226,7 @@ def run_MSFaST(params):
     groupionlists['cv'] = ionfilters['cv'].ions if analysis_params.CVfil else []
     groupionlists['relfil'] = ionfilters['relfil'].ions if analysis_params.relfil else []
     groupionlists['insource'] = ionfilters['insource'].ions if analysis_params.decon else []
+    groupionlists['adduct'] = ionfilters['adduct'].ions if getattr(analysis_params, 'adductgrp', False) else []
 
     # Add groups column to iondict csv
     iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=0, index_col=None)
