@@ -67,3 +67,22 @@ def test_scales_given_in_tenths_are_read_as_fractions():
     tenths = pvclust.PvClust(data, nboot=5, r=np.array(range(5, 15)), seed=0)
     assert np.allclose(tenths.r, pvclust.PvClust(data, nboot=5, seed=0).r)
     assert tenths.n_scaled[0] == 100 and tenths.n_scaled[-1] == 280
+
+
+def test_plot_labels_every_join_at_its_place_in_the_drawing():
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    data = separated_groups()
+    pv = pvclust.PvClust(data, nboot=20, seed=0)
+    fig, ax = plt.subplots()
+    dend = pv.plot(ax, labels=list(data.columns))
+    x, y = pv.node_positions(dend['leaves'])
+    # Each join drawn by scipy is a segment whose top midpoint is (x, y).
+    drawn = sorted((round((seg_x[1] + seg_x[2]) / 2, 6), round(seg_y[1], 6))
+                   for seg_x, seg_y in zip(dend['icoord'], dend['dcoord']))
+    assert drawn == sorted(zip(np.round(x, 6), np.round(y, 6)))
+    texts = [t.get_text() for t in ax.texts]
+    assert len(texts) == 2 * len(pv.result)
+    plt.close(fig)
