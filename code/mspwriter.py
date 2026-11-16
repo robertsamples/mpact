@@ -3,6 +3,9 @@
 Created on Mon Feb 20 22:19:37 2023
 
 @author: rsamples
+
+MPACT
+Copyright 2023, 2026, Robert M. Samples
 """
 import pickle
 import os

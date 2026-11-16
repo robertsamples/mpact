@@ -1,44 +1,74 @@
 # MPACT
 
-## Installation ##
+Metabolomics Peak Analysis Computational Tool.
 
-1. Download and install Anaconda from https://www.anaconda.com/products/individual
-2. Download and unzip repository (code>download ZIP) or clone with GitHub Desktop (code>open with GitHub Desktop)
+> **The MPACT desktop app is deprecated.** MPACT now runs in the browser at
+> **[mpactms.org](https://mpactms.org)**, with no installation. Its source is in
+> [robertsamples/mpactweb](https://github.com/robertsamples/mpactweb).
+>
+> The desktop app is still available:
+>
+> - Download a release from the [Releases page](https://github.com/robertsamples/mpact/releases).
+> - Its source code is on the [`legacy-desktop`](https://github.com/robertsamples/mpact/tree/legacy-desktop)
+>   branch, along with its documentation.
 
-## Startup ##
+## This repository
 
-_Windows_
+The `main` branch holds the MPACT analysis core: the modules that filter a
+peak table, compute the statistics and search the databases. MPACT Web copies
+these modules unmodified (`scripts/vendor_core.py` in the mpactweb repository)
+and runs them on its server.
 
-Double click MPACT shortcut in the main directory (note that nonfatal errors will cause program termination when run in this way and not through an IDE, if you wish to continue in the event of these errors launch through spyder using the Mac steps)
+```
+code/            the core modules
+code/tests/      their tests
+rawdata/PTY087I2 the example dataset the tests run on
+benchmarks/      benchmarks of the filtering algorithms
+```
 
-_Mac_
+To run the tests:
 
-1. Launch spyder through anaconda navigator, or by typing 'spyder' into the anaconda prompt
-2. Navigate to code directory in the  main project folder
-3. Open main.py (not __main__.py with underscores) in spyder
-4. click run button (green arrow in top toolbar)
+```
+pip install -r requirements.txt pytest
+python -m pytest code/tests
+```
 
-Full instructions for data processing are included in the MPACT manual.
+## Citation
 
-_Updates in Rev 23.05.15_
+If you use MPACT, please cite:
 
-- Added data export tab
-- Added GNPS peak table filtering functionality (experimental, only tested with FBMN export in MS-DIAL)
-- Removed analysis info tab
+Samples, R. M.; Puckett, S. P.; Balunas, M. J. Metabolomics Peak Analysis
+Computational Tool (MPACT): An Advanced Informatics Tool for Metabolomics and
+Data Visualization of Molecules from Complex Biological Samples. *Anal. Chem.*
+**2023**, *95* (23), 8770–8779.
+[doi:10.1021/acs.analchem.2c04632](https://doi.org/10.1021/acs.analchem.2c04632)
 
-_Updates in Rev 23.02.26_
+## Credits
 
-- Added filtering of database hits by kingdom and genus
-- Dependency check script spawns a window if any dependencies were installed informing user the kernal will restart.
-- Bugfixes in group set interactions, and bruker data import
+- **Robert M. Samples** (Center for Mass Spectrometry, Smith College): lead
+  developer. Algorithms, UI design and benchmarking of the original MPACT;
+  MPACT Web.
+- **Yilu Chen** (Department of Food Science, University of Massachusetts
+  Amherst): mass defect filter, adduct and neutral-loss grouping filter, and
+  the revised isotope filter.
+- **Sara P. Puckett**: UI design, testing and benchmarking of the original
+  MPACT.
+- **Marcy J. Balunas** (University of Michigan): supervision of the original
+  project.
 
-_Updates in Rev 23.02.19_
+The original work was supported by National Science Foundation grant
+IOS-1557914 and the Gordon and Betty Moore Foundation.
 
-- Added support for Bruker Metaboscape peak lists
-- Added support for MS-DIAL MSP files
-- Added MSP file writer to export in-source fragmentation patterns
-- Reduced lag when selecting features
-- Added multithreading when generating feature abundance plots
-- Fixed bug that resulted in feature highlights not being visible in data reanalysis
-- Fixed issue preventing samples/injections from being selected and highlighted in NMDS plots
-- Database hit images viewed are saved as images in a folder to eliminate rerendering
+`code/pvclust.py` implements the multiscale bootstrap of Shimodaira (2004),
+as in the R package pvclust (Suzuki and Shimodaira, 2006).
+
+## History and license
+
+MPACT was first released in 2022 as
+[BalunasLab/mpact](https://github.com/BalunasLab/mpact). That release was
+labelled GNU General Public License version 2, but it was built on PyQt5,
+which is licensed under version 3, so version 3 was the license it needed.
+This repository corrects the label and is released under the
+[GNU General Public License version 3](LICENSE). It has been developed
+independently since 2023. Files changed since the original release say so in
+their headers.

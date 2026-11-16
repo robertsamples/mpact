@@ -1,7 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
-Modifications Copyright 2026, Robert M. Samples
+Modifications Copyright 2026, Robert M. Samples and Yilu Chen
 """
 
 import pandas as pd

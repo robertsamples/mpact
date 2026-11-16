@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Qt-free per-column filter criteria and row-matching logic for the feature
 search tree (main.py's fillfttree()/treeWidget). Kept separate from the Qt

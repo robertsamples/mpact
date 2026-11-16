@@ -1,347 +1,176 @@
 """
-The original algorithm is implemented in R by Suzuki and Shimodira (2006):
-Pvclust: an R package for assessing the uncertanity in hierarchical
-clustering. This is its Python reimplementation. The final values produced are
-Approximately Unbiased p-value (AU) and Bootstrap Probability (BP) which
-are reporting the significance of each cluster in clustering structure.
-The AU value is less biased and clusters that have this value greater than
-95% are considered significant.
+MPACT
+Copyright 2026, Robert M. Samples
 
-Both values are calculated using Multiscale Bootstrap Resampling.
+Support values for hierarchical clustering by multiscale bootstrap resampling.
+
+For every cluster in the dendrogram of the columns of a data matrix, two
+p-values are computed:
+
+- BP, the bootstrap probability: how often the cluster appears when the rows
+  are resampled with replacement;
+- AU, the approximately unbiased p-value, from the multiscale bootstrap.
+
+Method: H. Shimodaira (2004), Approximately unbiased tests of regions using
+multistep-multiscale bootstrap resampling, Annals of Statistics 32, 2616-2641;
+R. Suzuki and H. Shimodaira (2006), Pvclust: an R package for assessing the
+uncertainty in hierarchical clustering, Bioinformatics 22, 1540-1542.
+
+The rows are resampled at several sample sizes n' = r * n. At each scale r
+the share of replicates containing a cluster, BP(r), gives
+
+    z(r) = qnorm(1 - BP(r)),
+
+and the model z(r) = v * sqrt(r) + c / sqrt(r) is fitted to the scales where
+0 < BP(r) < 1 by weighted least squares, each z(r) weighted by the inverse of
+its binomial variance. Then
+
+    AU = 1 - pnorm(v - c),    BP = 1 - pnorm(v + c),
+
+with standard errors by the delta method and a chi-square test of the fit.
+The values agree with the R package pvclust to within bootstrap error.
 """
 
-from math import sqrt
-from multiprocessing import Pool, cpu_count
-import pandas as pd
+from multiprocessing import Pool
+
 import numpy as np
+import pandas as pd
+from scipy.cluster import hierarchy
+from scipy.spatial.distance import pdist
+from scipy.stats import chi2, norm
 
-from scipy.stats import norm, chi2
-from scipy.cluster.hierarchy import (dendrogram, set_link_color_palette,
-                                     leaves_list, to_tree)
-# fastcluster.linkage is a drop-in for scipy's linkage that produces identical
-# results much faster -- a big win here because bootstrap clustering calls it
-# thousands of times. Fall back to scipy when fastcluster isn't installed.
 try:
-    from fastcluster import linkage
-except ImportError:
-    from scipy.cluster.hierarchy import linkage
-import matplotlib.pyplot as plt
+    import fastcluster
+except ImportError:  # optional: scipy is used without it
+    fastcluster = None
 
-from sklearn.linear_model import LinearRegression
+# Scales r = n'/n, as in pvclust.
+DEFAULT_SCALES = np.round(np.arange(0.5, 1.45, 0.1), 1)
+COLUMNS = ['AU', 'BP', 'SE.AU', 'SE.BP', 'pchi', 'v', 'c']
+
+
+def linkage(data, method='ward', metric='euclidean'):
+    """Linkage matrix of the columns of ``data`` (variables x objects)."""
+    distances = pdist(np.asarray(data, dtype=float).T, metric=metric)
+    if fastcluster is not None:
+        return fastcluster.linkage(distances, method=method)
+    return hierarchy.linkage(distances, method=method)
+
+
+def cluster_masks(linkage_matrix, n_objects):
+    """The objects in each cluster of a linkage matrix, one bit per object,
+    in linkage row order."""
+    members = [1 << i for i in range(n_objects)]
+    for left, right in np.asarray(linkage_matrix)[:, :2].astype(int):
+        members.append(members[left] | members[right])
+    return members[n_objects:]
+
+
+def _count_scale(job):
+    """For one scale: how many of ``nboot`` replicates contain each target
+    cluster. Run in a worker when ``parallel`` is set."""
+    data, n_rows, targets, nboot, method, metric, seed = job
+    rng = np.random.default_rng(seed)
+    n_objects = data.shape[1]
+    counts = np.zeros(len(targets), dtype=np.int64)
+    for _ in range(nboot):
+        rows = rng.integers(0, data.shape[0], size=n_rows)
+        found = cluster_masks(linkage(data[rows], method, metric), n_objects)
+        for mask in found:
+            position = targets.get(mask)
+            if position is not None:
+                counts[position] += 1
+    return counts
+
+
+def fit(scales, bp, nboot):
+    """Fit z(r) = v sqrt(r) + c / sqrt(r) to one cluster's bootstrap
+    probabilities. Returns the values for ``COLUMNS``."""
+    scales = np.asarray(scales, dtype=float)
+    bp = np.asarray(bp, dtype=float)
+    usable = (bp > 0) & (bp < 1)
+    if usable.sum() < 2:
+        # Too few scales to fit: always (or never) found at almost every
+        # scale. Report what was seen at the scale nearest r = 1.
+        seen = float(bp[np.argmin(np.abs(scales - 1))])
+        return [seen, seen, 0.0, 0.0, np.nan, np.nan, np.nan]
+
+    r, p = scales[usable], bp[usable]
+    z = norm.ppf(1 - p)
+    variance = p * (1 - p) / (norm.pdf(z) ** 2 * nboot)
+    weight = 1 / variance
+    design = np.column_stack([np.sqrt(r), 1 / np.sqrt(r)])
+    information = design.T @ (design * weight[:, None])
+    covariance = np.linalg.inv(information)
+    v, c = covariance @ (design.T @ (weight * z))
+
+    residual = z - design @ np.array([v, c])
+    statistic = float(np.sum(weight * residual ** 2))
+    df = int(usable.sum()) - 2
+    pchi = float(chi2.sf(statistic, df)) if df > 0 else 1.0
+
+    au_z, bp_z = v - c, v + c
+    se_au = norm.pdf(au_z) * np.sqrt(max(covariance[0, 0] + covariance[1, 1]
+                                         - 2 * covariance[0, 1], 0.0))
+    se_bp = norm.pdf(bp_z) * np.sqrt(max(covariance[0, 0] + covariance[1, 1]
+                                         + 2 * covariance[0, 1], 0.0))
+    return [float(norm.sf(au_z)), float(norm.sf(bp_z)), float(se_au), float(se_bp),
+            pchi, float(v), float(c)]
+
 
 class PvClust:
-    """ Calcuclate AU and BP probabilities for each cluster of the data."""
-    def __init__(self, data, method='ward', metric='euclidean',
-                 nboot=1000, r=np.array(range(5, 15)), parallel=False):
-        """Parameters:
-            - data : DataFrame
-              a dataset to which clustering and sampling are applied
-            - method: a linkage method used in hierarchical clustering
-            - metric: a distance metric used in hierarchical clustering
-            - nboot: a number of bootstrap samples
-            - r: an array of scaling constants
-            - parallel: boolean value stating should the algorithm run in
-            parallel
+    """AU and BP support for every cluster of a hierarchical clustering.
 
-        :returns Approximately Unbiased p-value and Bootstrap Probability for
-        every dendrogram node.
-        :rtype dict
-        """
+    ``data`` is variables x objects, as in pvclust: the columns are clustered
+    and the rows are resampled. ``r`` is the list of scales, as fractions of
+    the number of rows (whole numbers are read as tenths, so the older
+    ``range(5, 15)`` still means 0.5 to 1.4). ``seed`` makes a run
+    repeatable; results do not depend on ``parallel``.
 
-        self.data = data
-        self.nboot = nboot   # number of bootstrap replicates
-        self.parallel = parallel
+    After construction:
+      ``linkage_matrix``  the clustering of the full data
+      ``clusters``        each cluster's objects, by column label
+      ``bp_by_scale``     clusters x scales bootstrap probabilities
+      ``result``          one row per cluster, in linkage row order, with
+                          the columns AU, BP, SE.AU, SE.BP, pchi, v, c
+    """
 
-        self.n = len(self.data)
-        r = np.array([i/10 for i in r])
-        self.n_scaled = np.unique([int(i*self.n) for i in r])
-        self.r = np.unique([i/self.n for i in self.n_scaled])
+    def __init__(self, data, method='ward', metric='euclidean', nboot=1000,
+                 r=None, parallel=False, seed=None):
+        frame = pd.DataFrame(data)
+        self.data = frame
+        self.method = method
+        self.metric = metric
+        self.nboot = int(nboot)
+        self.parallel = bool(parallel)
 
-        # apply hierarchical clustering and get clusters
-        self.metric, self.method = metric, method
-        hc = HierarchicalClusteringClusters(data.transpose(), method, metric)
-        self.linkage_matrix = hc.linkage_matrix
-        self.clusters = hc.find_clusters()
+        scales = DEFAULT_SCALES if r is None else np.asarray(r, dtype=float)
+        if np.all(scales >= 2) and np.allclose(scales, np.round(scales)):
+            scales = scales / 10
+        values = frame.to_numpy(dtype=float)
+        self.n = values.shape[0]
+        self.n_scaled = np.maximum(np.round(scales * self.n).astype(int), 1)
+        # The scales actually used: n' is a whole number of rows.
+        self.r = self.n_scaled / self.n
 
-        self._result = self._result()
-        self.result = self._result
+        self.linkage_matrix = linkage(values, method, metric)
+        masks = cluster_masks(self.linkage_matrix, values.shape[1])
+        labels = list(frame.columns)
+        self.clusters = [[labels[i] for i in range(len(labels)) if mask >> i & 1]
+                         for mask in masks]
+        targets = {mask: position for position, mask in enumerate(masks)}
 
-    def _hc(self, n):
-        """ Do bootstrap sampling and then apply hierarchical clustering
-        to the sample """
-        data = self.data
-        # we are sampling instances
-        data = data.sample(n, replace=True, axis=0)
-        # HC is applied to columns each time (hence transposing)
-        temp = HierarchicalClusteringClusters(data.transpose(), self.method,
-                                              self.metric)
-        clusters = temp.find_clusters()
-
-        return clusters
-
-    def _nbootstrap_probability(self, n):
-        """ Calculate bootstrap probability of each cluster for the dataset of
-        size n """
-        # dictionary for counting repetitions of the same clusters throughout
-        # nboot different clusterings
-        repetitions = {i: 0 for i in range(len(self.clusters))}
-
-        # do HC nboot times for dataset of size n
-        for _ in range(self.nboot):
-            sample_clusters = self._hc(n)
-            # compare obtained clusters with the main ones and
-            # update repetitions if necessary
-            for cluster in sample_clusters:
-                if cluster in self.clusters:
-                    repetitions[self.clusters.index(cluster)] += 1
-
-        # calculate BP probability for each cluster for the sample of size n
-        BP = [repetitions[k]/self.nboot for k in repetitions.keys()]
-
-        return np.array(BP)
-
-    def _table(self):
-        """ Make a table of bootstrap probabilities for each sample size"""
-        # for each sample size in n_scaled calculate BPs of all clusters and
-        # add it to the table
-        if self.parallel:
-            print(f"Calculating using {cpu_count()} cores... ", end="")
+        seeds = np.random.SeedSequence(seed).spawn(len(self.n_scaled))
+        jobs = [(values, int(n_rows), targets, self.nboot, method, metric, child)
+                for n_rows, child in zip(self.n_scaled, seeds)]
+        if self.parallel and len(jobs) > 1:
             with Pool() as pool:
-                probabilities = pool.map(self._nbootstrap_probability,
-                                         self.n_scaled)
-
-            table = probabilities[0]
-            for i in probabilities[1::]:
-                table = np.column_stack((table, i))
-            print("Done.")
+                counts = pool.map(_count_scale, jobs)
         else:
-            table = np.empty([len(self.data.transpose())-1, 1])
-            for i in self.n_scaled:
-                print(f"Boostrap (r = {round(i/ self.n, 2)}) ... ", end="")
-                temp = self._nbootstrap_probability(i)
-                table = np.column_stack((table, temp))
-                print("Done.")
-            table = np.delete(table, 0, 1)
-        return table
+            counts = [_count_scale(job) for job in jobs]
 
-    def _wls_fit(self):
-        """ Take all calculated bootstrap probabilities of a single cluster and
-        fit a curve to it in order to calculate AU and BP for that cluster"""
-        nboot, r = self.nboot, self.r
-        r_sq_org = np.array([sqrt(j) for j in r])
-        r_isq_org = np.array([1/sqrt(j) for j in r])
-        eps = 0.001
-        table = self._table()
-
-        result = {}
-        for i in range(len(table)):
-            BP = table[i]
-            nboot_list = np.repeat(nboot, len(BP))
-            use = np.logical_and(np.greater(BP, eps), np.less(BP, 1-eps))
-
-            if sum(use) < 3:
-                au_bp = np.array([0, 0]) if np.mean(BP) < 0.5 else \
-                    np.array([1, 1])
-                result[i] = np.concatenate((au_bp, np.array([0, 0, 0, 0, 0])))
-            else:
-                BP = BP[use]
-                r_sq = r_sq_org[use]
-                r_isq = r_isq_org[use]
-                nboot_list = nboot_list[use]
-
-                y = -norm.ppf(BP)
-                X_model = np.array([[i, j] for i, j in zip(r_sq, r_isq)])
-                weight = ((1-BP)*BP)/((norm.pdf(y)**2)*nboot_list)
-
-                model = LinearRegression(fit_intercept=False)
-                results_lr = model.fit(X_model, y, sample_weight=1/weight)
-                z_au = np.array([1, -1])@results_lr.coef_
-                z_bp = np.array([1, 1])@results_lr.coef_
-                # AU and BP
-                au_bp = np.array([1-norm.cdf(z_au), 1-norm.cdf(z_bp)])
-
-                Xw = [i/j for i, j in zip(X_model, weight)]
-                temp = X_model.transpose()@Xw
-                V = np.linalg.solve(temp, np.identity(len(temp)))
-                vz_au = np.array([1, -1])@V@np.array([1, -1])
-                vz_bp = np.array([1, 1])@V@np.array([1, 1])
-                # estimted standard errors for p-values
-                se_au = norm.pdf(z_au)*sqrt(vz_au)
-                se_bp = norm.pdf(z_bp)*sqrt(vz_bp)
-
-                # residual sum of squares
-                y_pred = results_lr.predict(X_model)
-                rss = sum((y - y_pred)**2/weight)
-                df = sum(use) - 2  # degrees of freedom
-                pchi = 1 - chi2.cdf(rss, df) if (df > 0) else 1.0
-
-                result[i] = np.concatenate(
-                    (au_bp, np.array([se_au, se_bp, pchi]), results_lr.coef_))
-
-        return result
-
-    def _result(self):
-        # calculate AU and BP values
-        result = pd.DataFrame.from_dict(
-            self._wls_fit(), orient="index",
-            columns=['AU', 'BP', 'SE.AU', 'SE.BP', 'pchi', 'v', 'c'])
-        return result
-
-    def plot(self, ax, labels=None, link_color_func=None): #added axis input
-        """Plot dendrogram with AU BP values for each node"""
-        plot_dendrogram(self.linkage_matrix,
-                        np.array(self.result[['AU', 'BP']]), ax, labels,
-                        link_color_func)
-
-    def seplot(self, pvalue='AU', annotate=False):
-        """p-values vs Standard error plot"""
-        x = self.result['AU'] if pvalue == 'AU' else self.result['BP']
-        y = self. result['SE.AU'] if pvalue == 'AU' else self.result['SE.BP']
-        clusters = []
-
-        plt.scatter(x, y, facecolors='none', edgecolors='r')
-        plt.title("p-value vs Standard Error plot")
-        plt.xlabel(pvalue + " p-value")
-        plt.ylabel("Standard Error")
-        if annotate:
-            for i in range(len(y)):
-                if y[i] > 0.6:
-                    plt.text(x[i], y[i], f"{i}")
-                    clusters.append(i)
-        plt.show()
-        if clusters:
-            return clusters
-
-    def print_result(self, which=[], digits=3):
-        """Print only desired clusters and/or print values to the desired
-        decimal point"""
-        print(" Clustering method:", self.method, "\n", "Distance metric:",
-              self.metric, "\n", "Number of replicates:", self.nboot, "\n")
-        results = round(self._result, digits)
-
-        if not which:
-            print(results)
-        else:
-            print(results.iloc[which, ])
-
-
-class HierarchicalClusteringClusters:
-    """Apply Hierarhical Clustering on the data and find elements of
-    each cluster"""
-    def __init__(self, data, method='ward', metric='euclidean'):
-
-        self.linkage_matrix = linkage(data, method, metric)
-        self.nodes = to_tree(self.linkage_matrix, rd=True)[1]
-
-    def l_branch(self, left, node, nodes):
-        if not node.is_leaf():
-            if node.left.id > (len(nodes)-1)/2:
-                self.l_branch(left, nodes[node.left.id], nodes)
-                self.r_branch(left, nodes[node.left.id], nodes)
-            else:
-                left.append(node.left.id)
-        else:
-            left.append(node.id)
-
-        return list(set(left))
-
-    def r_branch(self, right, node, nodes):
-        if not node.is_leaf():
-            if node.right.id > (len(nodes)-1)/2:
-                self.r_branch(right, nodes[node.right.id], nodes)
-                self.l_branch(right, nodes[node.right.id], nodes)
-            else:
-                right.append(node.right.id)
-        else:
-            right.append(node.id)
-
-        return list(set(right))
-
-    # find all clusters produced by HC from leaves to the root node
-    def find_clusters(self):
-        nodes = self.nodes
-        clusters = []
-        for i in range(len(leaves_list(self.linkage_matrix)), len(nodes)):
-            left = self.l_branch([], nodes[i], nodes)
-            right = self.r_branch([], nodes[i], nodes)
-
-            node_i = sorted(set(left + right))
-            if node_i:
-                clusters.append(node_i)
-
-        return clusters
-
-
-def plot_dendrogram(linkage_matrix, pvalues, axis, labels=None, link_color_func=None): #added axis input
-    """ Plot dendrogram with AU BP values for each node"""
-    d = dendrogram(linkage_matrix, no_plot=True)
-    xcoord = d["icoord"]
-    ycoord = d["dcoord"]
-    # Obtaining the coordinates of all nodes above leaves
-    x = {i: (j[1]+j[2])/2 for i, j in enumerate(xcoord)}
-    y = {i: j[1] for i, j in enumerate(ycoord)}
-    pos = node_positions(y, x)
-
-    set_link_color_palette(['c', 'g'])
-    # link_color_func, when given, takes priority over color_threshold/
-    # above_threshold_color (scipy's own precedence rule) -- that's how the
-    # dendrogram tab's purity coloring (clusterpurity.py) reaches the
-    # bootstrap dendrogram too.
-    d = dendrogram(linkage_matrix, labels=labels, above_threshold_color='black',
-                   color_threshold=0, leaf_rotation=90, ax=axis,
-                   link_color_func=link_color_func)
-    maxval = max(y.values())
-    ax = axis
-
-    # AU/BP labels used to be positioned with a fixed x-shift in icoord
-    # units (e.g. "x-7"). icoord spacing is always 10 units per leaf
-    # regardless of leaf count, but the AXES' actual pixel width is not --
-    # with more leaves squeezed into the same plot width, each icoord unit
-    # maps to fewer pixels, so a fixed icoord offset shrinks to a fixed
-    # *fraction* of leaf spacing but an ever-shrinking number of *pixels*,
-    # eventually overlapping (e.g. "AU"/"BP" merging into "AUBP" once there
-    # are enough leaves). Anchoring with ha='right'/'left' plus a constant
-    # offset in POINTS (not data units) keeps a fixed pixel gap regardless
-    # of leaf count or icoord scale -- no more digit-width-dependent x-shift
-    # hack for AU values of 100 vs not. Per-node fontsize is similarly
-    # scaled down as leaf count grows, so neighbouring nodes' labels (which
-    # do have a fixed minimum icoord-and-therefore-pixel separation) don't
-    # run into each other either.
-    n_leaves = len(d['ivl'])
-    value_fontsize = max(5, min(8, 140 / n_leaves))
-    header_fontsize = value_fontsize + 3
-    gap_points = 2
-
-    for node, (nx, ny) in pos.items(): #modifications added to scale y axis label shifts
-        y_offset = ny + maxval / 200
-
-        if node == (len(pos.items())-1):
-            ax.annotate('AU', xy=(nx, y_offset), xytext=(-gap_points, 0),
-                        textcoords='offset points', ha='right', va='bottom',
-                        fontsize=header_fontsize, fontweight='bold', color='purple')
-            ax.annotate('BP', xy=(nx, y_offset), xytext=(gap_points, 0),
-                        textcoords='offset points', ha='left', va='bottom',
-                        fontsize=header_fontsize, fontweight='bold', color='black')
-        else:
-            au_significant = pvalues[node][0] * 100 == 100
-            ax.annotate(f'{pvalues[node][0]*100:.0f}', xy=(nx, y_offset), xytext=(-gap_points, 0),
-                        textcoords='offset points', ha='right', va='bottom',
-                        fontsize=value_fontsize, color='purple',
-                        fontweight='bold' if au_significant else 'normal')
-            ax.annotate(f'{pvalues[node][1]*100:.0f}', xy=(nx, y_offset), xytext=(gap_points, 0),
-                        textcoords='offset points', ha='left', va='bottom',
-                        fontsize=value_fontsize, color='black',
-                        fontweight='bold' if au_significant else 'normal')
-
-
-def node_positions(x, y):
-    positions = {**x, **y}
-    for key, value in positions.items():
-        if key in x and key in y:
-            positions[key] = (value, x[key])
-
-    positions = sorted(positions.items(), key=lambda x: x[1][1])
-    pos = {i: positions[i][1] for i in range(len(positions))}
-    print(pos)
-
-    return pos
+        self.bp_by_scale = pd.DataFrame(np.column_stack(counts) / self.nboot,
+                                        columns=np.round(self.r, 3))
+        self.result = pd.DataFrame(
+            [fit(self.r, row, self.nboot) for row in self.bp_by_scale.to_numpy()],
+            columns=COLUMNS)

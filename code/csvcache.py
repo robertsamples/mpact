@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Memoizing cache for repeated ``pd.read_csv`` calls against the static,
 per-run output files (``iondict.csv``, ``<name>_filtered.csv``,
