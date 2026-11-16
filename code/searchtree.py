@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Replaces the feature-search tab's Designer-created QTreeWidget
 (``ui_main.py``'s ``self.treeWidget``) with a real QTreeView backed by a

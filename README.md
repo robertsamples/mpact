@@ -1,4 +1,8 @@
-# MPACT
+# MPACT (legacy desktop app)
+
+> This is the deprecated desktop version of MPACT, kept for existing users.
+> MPACT now runs in the browser at [mpactms.org](https://mpactms.org). Desktop
+> builds are on the [Releases page](https://github.com/robertsamples/mpact/releases).
 
 ## Installation ##
 
@@ -42,3 +46,16 @@ _Updates in Rev 23.02.19_
 - Fixed bug that resulted in feature highlights not being visible in data reanalysis
 - Fixed issue preventing samples/injections from being selected and highlighted in NMDS plots
 - Database hit images viewed are saved as images in a folder to eliminate rerendering
+
+## History and license
+
+MPACT was first released in 2022 as
+[BalunasLab/mpact](https://github.com/BalunasLab/mpact). That release was
+labelled GNU General Public License version 2, but it was built on PyQt5,
+which is licensed under version 3, so version 3 was the license it needed.
+This repository corrects the label and is released under the
+[GNU General Public License version 3](LICENSE). Files changed since the
+original release say so in their headers.
+
+`code/pvclust.py` implements the multiscale bootstrap of Shimodaira (2004),
+as in the R package pvclust (Suzuki and Shimodaira, 2006).

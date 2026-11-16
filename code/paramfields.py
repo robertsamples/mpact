@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Shared schema for the ``analysis_parameters`` fields that are plain 1:1
 checkbox reads/writes -- no branching, no derived values, no side effects.

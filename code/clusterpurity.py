@@ -1,6 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
+Modifications Copyright 2026, Robert M. Samples
 
 Qt-free dendrogram "purity" coloring: a branch is colored green if every
 leaf beneath it shares the same group label -- i.e. that group is a

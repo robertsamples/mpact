@@ -38,6 +38,11 @@ datas = [
     (os.path.join(CODE_DIR, "npatlas.tsv"), "."),
     (os.path.join(CODE_DIR, "compoundimages"), "compoundimages"),
     (os.path.join(CODE_DIR, "cog.ico"), "."),
+    # Beta filter switches, read from next to main.py; all off as shipped.
+    (os.path.join(CODE_DIR, "adduct_config.txt"), "."),
+    # GPLv3 terms and where the source is, shipped with every build.
+    (os.path.join(REPO_ROOT, "LICENSE"), "."),
+    (os.path.join(REPO_ROOT, "README.md"), "."),
 ]
 binaries = []
 

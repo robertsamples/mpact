@@ -1,7 +1,7 @@
 """
 MPACT
 Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
-Modifications Copyright 2026, Robert M. Samples
+Modifications Copyright 2026, Robert M. Samples and Yilu Chen
 """
 
 import re
@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
         #self.show() # makes window reappear, acts like normal window now (on top now but can be underneath if you raise another window)
         
         self.ui.setupUi(self)
-        self.ui.label_credits.setText('v1.00.02 r26.06.30')
+        self.ui.label_credits.setText('v1.00.03 r26.11.16')
 
         # "PCA" was a misnomer left over from when this checkbox/button only
         # ran NMDS (see plotting.plot_ordination) -- the underlying
