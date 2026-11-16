@@ -174,3 +174,31 @@ class PvClust:
         self.result = pd.DataFrame(
             [fit(self.r, row, self.nboot) for row in self.bp_by_scale.to_numpy()],
             columns=COLUMNS)
+
+    def node_positions(self, leaves):
+        """(x, y) of each cluster's join in a scipy dendrogram whose leaf
+        order is ``leaves``, in linkage row order. scipy places the i-th leaf
+        at x = 5 + 10 i and each join midway between its two branches."""
+        n_objects = len(leaves)
+        x = np.empty(2 * n_objects - 1)
+        x[np.asarray(leaves)] = 5 + 10 * np.arange(n_objects)
+        for row, (left, right) in enumerate(self.linkage_matrix[:, :2].astype(int)):
+            x[n_objects + row] = (x[left] + x[right]) / 2
+        return x[n_objects:], self.linkage_matrix[:, 2]
+
+    def plot(self, ax, labels=None, link_color_func=None, fontsize=7):
+        """Draw the dendrogram on a matplotlib ``ax`` with AU (red, left) and
+        BP (green, right) in percent at each join, as pvclust does. Returns
+        scipy's dendrogram dictionary."""
+        dend = hierarchy.dendrogram(
+            self.linkage_matrix, ax=ax, labels=labels, leaf_rotation=90,
+            color_threshold=0, above_threshold_color='black',
+            link_color_func=link_color_func)
+        x, y = self.node_positions(dend['leaves'])
+        lift = 0.01 * (y.max() if len(y) else 1)
+        for (au, bp), xi, yi in zip(self.result[['AU', 'BP']].to_numpy(), x, y):
+            ax.text(xi - 1, yi + lift, f'{round(100 * au)}', color='red',
+                    fontsize=fontsize, ha='right', va='bottom')
+            ax.text(xi + 1, yi + lift, f'{round(100 * bp)}', color='green',
+                    fontsize=fontsize, ha='left', va='bottom')
+        return dend
