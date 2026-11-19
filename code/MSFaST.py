@@ -221,6 +221,13 @@ def run_MSFaST(params):
         adduct_removed = filter.adductgroup(analysis_params, getattr(analysis_params, 'adduct_list', None))
         ionfilters['adduct'] = filter.ionfilter('', list(adduct_removed))
     filter.applyfilters(analysis_params, ionfilters)
+    # Beta sample normalization: after filtering, which it would not change
+    # (the filters compare features within a sample, or replicates of one
+    # sample), and before the group statistics, which it does change.
+    if getattr(analysis_params, 'samplenorm', 'none') in ('sum', 'pqn'):
+        stats.samplenormalize(analysis_params)
+        if analysis_params.grpave:
+            stats.groupave(analysis_params)
     if analysis_params.prperr:
         stats.properr(analysis_params)
 
@@ -290,6 +297,15 @@ def run_MSFaST(params):
                             '---Filtering---\n',
                             '-CV filtering-\n',
                             'CV threshold: ' + str(analysis_params.cvthresh) + '\n',
+                            ('CV sample cutoff (beta): ' + str(getattr(analysis_params, 'cvgate_frac', 0.01))
+                             + ' x feature maximum\n') if getattr(analysis_params, 'cvgate', False) else '',
+                            ('Sample normalization (beta): '
+                             + {'sum': 'total signal', 'pqn': 'probabilistic quotient'}[analysis_params.samplenorm]
+                             + '\n'
+                             + ('Left out of normalization: '
+                                + ', '.join(map(str, getattr(analysis_params, 'samplenorm_skip', None) or []))
+                                + '\n' if getattr(analysis_params, 'samplenorm_skip', None) else '')
+                             ) if getattr(analysis_params, 'samplenorm', 'none') in ('sum', 'pqn') else '',
                             '\n',
                             '-Relative filtering-\n',
                             'Ringing window: ' + str(analysis_params.ringingwin) + '\n',

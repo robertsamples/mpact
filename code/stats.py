@@ -4,6 +4,9 @@ Copyright 2022, Robert M. Samples, Sara P. Puckett, and Marcy J. Balunas
 Modifications Copyright 2026, Robert M. Samples
 """
 
+import shutil
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from scipy import stats
@@ -122,6 +125,122 @@ def groupave(analysis_params):
         analysis_params.outputdir / (analysis_params.filename.stem + '_groupaverages.csv'),
         header=True, index=True
     )
+
+# samplenormalize warns about a sample whose signal is more than this many
+# times above or below the median sample.
+EXTREME_FACTOR = 5.0
+
+
+def normalization_factors(msdata, method, skip_groups=()):
+    """
+    Per-sample normalization factors for a wide peak table.
+
+    Args:
+        msdata (DataFrame): features x injections, columns (group, sample, injection).
+        method (str): 'sum' (total signal) or 'pqn' (probabilistic quotient,
+            Dieterle et al. 2006, Anal. Chem. 78, 4281).
+        skip_groups: groups left as they are (factor 1), such as blanks.
+
+    Returns:
+        DataFrame indexed (group, sample) with the number of injections, the
+        sample's signal relative to the median sample, and the factor that
+        divides it out (1 / relative signal).
+    """
+    # One profile per sample: the mean of its technical replicate injections,
+    # so every injection of a sample gets the same factor and technical CVs
+    # are unchanged.
+    profiles = msdata.T.groupby(level=[0, 1], sort=True).mean().T
+    injections = msdata.T.groupby(level=[0, 1], sort=True).size()
+    used = ~profiles.columns.get_level_values(0).isin(list(skip_groups))
+    relative = pd.Series(np.nan, index=profiles.columns)
+    if used.any():
+        sample_profiles = profiles.loc[:, used]
+        if method == 'sum':
+            totals = sample_profiles.sum(axis=0)
+            relative[used] = totals / totals[totals > 0].median()
+        elif method == 'pqn':
+            reference = sample_profiles.median(axis=1)
+            ratios = sample_profiles.div(reference, axis=0)
+            ratios = ratios.where((sample_profiles > 0) & (reference > 0).values[:, None])
+            quotients = ratios.median(axis=0)
+            relative[used] = quotients / quotients[quotients > 0].median()
+        else:
+            raise ValueError('unknown normalization method: ' + str(method))
+    # A sample with no usable signal is left as it is.
+    relative = relative.where(relative > 0)
+    factors = pd.DataFrame({'injections': injections,
+                            'relative signal': relative,
+                            'factor': (1 / relative).fillna(1.0)})
+    factors.index.names = ['Group', 'Sample']
+    return factors
+
+
+def _scale_table(path, factors):
+    """Multiply a peak table on disk (three header rows, then Compound, m/z,
+    RT and one column per injection) by its sample's factor, in place."""
+    table = pd.read_csv(path, sep=',', header=None, index_col=None, low_memory=False)
+    header, body = table.iloc[:3], table.iloc[3:]
+    lookup = factors['factor'].to_dict()
+    column_factors = [lookup.get((str(header.iat[0, i]), str(header.iat[1, i])), 1.0)
+                      for i in range(3, table.shape[1])]
+    values = body.iloc[:, 3:].astype(float) * np.array(column_factors)
+    body = pd.concat([body.iloc[:, :3], values], axis=1)
+    pd.concat([header, body], ignore_index=True).to_csv(path, index=False, header=False)
+
+
+def samplenormalize(analysis_params):
+    """
+    Beta: normalize each biological sample to the same overall signal.
+
+    The factor is worked out from the features that passed every filter, so
+    noise, solvent and blank peaks do not set it, and it is applied to every
+    injection of the sample alike, so technical CVs are unchanged. The
+    formatted and filtered tables are rescaled in place; the unscaled filtered
+    table is kept as <name>_filtered_raw.csv and the factors are written to
+    <name>_normfactors.csv. The blank group, and any group named in
+    samplenorm_skip (a media blank, say), is left unscaled and is not used to
+    work out the factors of the others.
+
+    Args:
+        analysis_params (object): needs samplenorm ('sum' or 'pqn'), outputdir,
+            filename and blnkgrp; samplenorm_skip is optional.
+
+    Returns:
+        DataFrame: the factors (see normalization_factors).
+    """
+    method = getattr(analysis_params, 'samplenorm', 'none')
+    print(f'Normalizing samples (beta: {method})')
+    stem = analysis_params.outputdir / analysis_params.filename.stem
+    filtered_path = Path(str(stem) + '_filtered.csv')
+    formatted_path = Path(str(stem) + '_formatted.csv')
+
+    filtered = pd.read_csv(filtered_path, sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+    blank = getattr(analysis_params, 'blnkgrp', '') or ''
+    skip = [str(g) for g in getattr(analysis_params, 'samplenorm_skip', None) or []]
+    if blank and blank not in skip:
+        skip.insert(0, blank)
+    if skip:
+        print('  left unscaled: ' + ', '.join(skip))
+    factors = normalization_factors(filtered, method, skip_groups=skip)
+    factors.to_csv(Path(str(stem) + '_normfactors.csv'), header=True, index=True)
+    names = factors.index.get_level_values(1)
+    unused = factors['relative signal'].isna() & ~factors.index.get_level_values(0).isin(skip)
+    if unused.any():
+        print('  warning: no usable signal in ' + ', '.join(names[unused]) + '; left unscaled')
+    # A factor this far from 1 is more likely a group with different contents
+    # (a media blank, a strain that makes more) than a dilution.
+    relative = factors['relative signal']
+    extreme = (relative < 1 / EXTREME_FACTOR) | (relative > EXTREME_FACTOR)
+    if extreme.any():
+        listed = ', '.join(f'{n} ({r:.3g}x)' for n, r in zip(names[extreme], relative[extreme]))
+        print(f'  warning: signal more than {EXTREME_FACTOR:g}x from the median sample in '
+              f'{listed}; check these are dilutions, or leave their groups out')
+
+    shutil.copyfile(filtered_path, Path(str(stem) + '_filtered_raw.csv'))
+    for path in (formatted_path, filtered_path):
+        _scale_table(path, factors)
+    return factors
+
 
 def properr(analysis_params):
     """

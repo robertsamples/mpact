@@ -10,7 +10,6 @@ import math
 import scipy.cluster.hierarchy as spc
 from scipy import stats
 import mspwriter
-from tqdm import tqdm
 
 class ionmerge:
     """
@@ -234,53 +233,48 @@ def parsionlists(analysis_params):
 def cvfilter(analysis_params, ionfilterlist, threshold):
     """
     Filters ions based on the coefficient of variation (CV).
+
+    Each sample's CV is taken over its technical replicate injections, then
+    summarised per feature as the average or median over samples.
+
+    Beta (analysis_params.cvgate): only samples whose mean is at least
+    analysis_params.cvgate_frac of the feature's highest sample mean count
+    towards the summary. In a varied set of samples a compound may be real in
+    a few and sit near the noise in many others, and those noisy CVs would
+    otherwise decide the median.
     """
     print('Running CV filter')
-    
-    # Calculate total number of cells in the dataset and set chunk size based on 100,000 cells per chunk
-    header = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'), nrows=0, header=[0, 1, 2])
-    total_columns = header.shape[1]
-    cells_per_chunk = 100_000
-    chunk_size = max(1, cells_per_chunk // total_columns)  # Rows per chunk
 
-    # Initialize containers for aggregated results
-    means = []
-    stds = []
-    counts = []
+    # Works on the wide table (features x injections) and summarises across
+    # columns, rather than stacking it into one row per value.
+    msdata = pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+                         sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+    by_sample = msdata.T.groupby(level=[0, 1], sort=True)
+    mean_values = by_sample.mean().T     # features x (group, sample)
+    std_values = by_sample.std().T
+    del by_sample, msdata
 
-    # Import data and calculate sums and counts in chunks with a progress bar
-    with tqdm(desc='Processing chunks', unit='chunk') as pbar:
-        for chunk in pd.read_csv(analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
-                                 sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size):
-            try:
-                chunk_stacked = chunk.stack([0, 1, 2], future_stack=True)
-            except TypeError:
-                chunk_stacked = chunk.stack([0, 1, 2])
-            
-            # Group data by the specified levels and calculate mean, std, and count per group
-            groupby_indices = chunk_stacked.groupby(level=[0, 1, 2, 3, 4])
-            means.append(groupby_indices.mean())
-            stds.append(groupby_indices.std())
-            counts.append(groupby_indices.count())
-
-            pbar.update(1)
-
-    # Concatenate results and calculate overall mean and standard deviation
-    mean_values = pd.concat(means)
-    std_values = pd.concat(stds)
-    count_values = pd.concat(counts)
-    
-    # Calculate CV
+    # Calculate CV (NaN for a sample with one injection or no signal)
     msdata_cv = std_values / mean_values
-    
-    # Calculate average and median CV across the first level
-    msdatameancv = msdata_cv.groupby(level=0).mean()
-    msdatamediancv = msdata_cv.groupby(level=0).median()
+    msdata_cv.index = msdata_cv.index.get_level_values(0)
+    mean_values.index = msdata_cv.index
+
+    gate = getattr(analysis_params, 'cvgate', False)
+    if gate:
+        frac = float(getattr(analysis_params, 'cvgate_frac', 0.01))
+        print(f'  beta: samples below {frac:g} x the feature maximum left out of its CV')
+        msdata_cv = msdata_cv.where(mean_values.ge(mean_values.max(axis=1) * frac, axis=0))
+
+    # Calculate average and median CV across samples
+    msdatameancv = msdata_cv.mean(axis=1)
+    msdatamediancv = msdata_cv.median(axis=1)
 
     # Add average and median CV to iondict.csv
     iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
     iondict['average CV'] = msdatameancv
     iondict['median CV'] = msdatamediancv
+    if gate:
+        iondict['CV samples used'] = msdata_cv.notna().sum(axis=1)
     iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
 
     # Determine ions to keep and reject based on CV threshold
@@ -296,7 +290,7 @@ def cvfilter(analysis_params, ionfilterlist, threshold):
     iondict = pd.read_csv(analysis_params.outputdir / 'iondict.csv', sep=',', header=[0], index_col=0)
     iondict['pass_cvfil'] = ~iondict.index.isin(ionfilterlist['cv'].ions)
     iondict.to_csv(analysis_params.outputdir / 'iondict.csv', header=True, index=True)
-    
+
     return ionfilterlist
 
 
