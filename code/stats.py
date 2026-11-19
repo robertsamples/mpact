@@ -8,7 +8,6 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from filter import listfilter
-from tqdm import tqdm
 
 def tstat(m1, sd1, n1, m2, sd2, n2):
     """
@@ -64,85 +63,54 @@ def groupave(analysis_params):
     """
     print('Averaging groups')
 
-    # Calculate total number of rows and set chunk size
-    formatted_path = analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv')
-    # Use a context manager so the file handle is closed promptly (the bare
-    # ``sum(1 for _ in open(...))`` left the handle open until GC -- a
-    # ResourceWarning that surfaced in the test suite).
-    with open(formatted_path) as row_counter:
-        total_rows = sum(1 for _ in row_counter) - 1
-    header = pd.read_csv(formatted_path, nrows=0, header=[0, 1, 2])
-    total_columns = header.shape[1]
-    cells_per_chunk = 100_000
-    chunk_size = max(1, cells_per_chunk // total_columns)  # Rows per chunk
+    # Works on the wide table (features x injections) and averages across
+    # columns. Stacking it into one row per value, as before, used several GB
+    # for a large table (40,000 features x 400 injections is 17 million rows
+    # with a six-level index) and got the process killed on small servers.
+    msdata = pd.read_csv(
+        analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
+        sep=',', header=[0, 1, 2], index_col=[0, 1, 2])
+    msdata.index.names = ['Compound', 'm/z', 'Retention time']
+    msdata.columns.names = ['Group', 'Sample', 'Injection']
+    values = msdata.T   # one row per injection column
 
-    # Initialize lists to collect results from each chunk
-    sum_values_list = []
-    counts_list = []
+    # Mean per injection (repeated columns for the same injection are averaged)
+    injection_mean = values.groupby(level=[0, 1, 2], sort=True).mean()
+    del values, msdata
 
-    # Process data in chunks
-    with tqdm(total=(total_rows // chunk_size) + 1, desc='Processing chunks') as pbar:
-        for chunk in pd.read_csv(
-            analysis_params.outputdir / (analysis_params.filename.stem + '_formatted.csv'),
-            sep=',', header=[0, 1, 2], index_col=[0, 1, 2], chunksize=chunk_size
-        ):
-            # Stack the DataFrame to move column levels into the index
-            try:
-                chunk_stacked = chunk.stack(level=[0, 1, 2], future_stack=True)
-            except TypeError:
-                chunk_stacked = chunk.stack(level=[0, 1, 2])
-
-            # Set index names according to your data structure
-            chunk_stacked.index.names = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']
-
-            # Compute sum and counts per group
-            group_levels = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample', 'Injection']
-            sum_values_chunk = chunk_stacked.groupby(level=group_levels).sum()
-            count_chunk = chunk_stacked.groupby(level=group_levels).count()
-
-            # Append results to lists
-            sum_values_list.append(sum_values_chunk)
-            counts_list.append(count_chunk)
-
-            pbar.update(1)
-
-    # Concatenate all results
-    all_sum_values = pd.concat(sum_values_list)
-    all_counts = pd.concat(counts_list)
-
-    # Aggregate over the entire dataset
-    sum_values_df = all_sum_values.groupby(level=group_levels).sum()
-    counts_df = all_counts.groupby(level=group_levels).sum()
-
-    # Calculate mean per injection. (A per-injection variance/stddev was
-    # computed here previously but never used -- the technical/biological
-    # RSDs below are derived from the grouped means, not from it.)
-    mean_values = sum_values_df / counts_df
-
-    # Calculate technical RSDs and counts
-    # Group over technical replicates within each sample
-    tech_group_levels = ['Compound', 'm/z', 'Retention time', 'Group', 'Sample']
-    tech_mean = mean_values.groupby(level=tech_group_levels).mean()
-    tech_stddev = mean_values.groupby(level=tech_group_levels).std().fillna(0)
+    # Technical RSDs and counts: over the injections of each sample
+    by_sample = injection_mean.groupby(level=[0, 1], sort=True)
+    tech_mean = by_sample.mean()
+    tech_stddev = by_sample.std().fillna(0)
     tech_rsd = (tech_stddev / tech_mean).fillna(0)
-    techn = counts_df.groupby(level=tech_group_levels).size()  # Number of injections per sample
+    techn = by_sample.size()   # number of injections per sample
+    del injection_mean, tech_stddev
 
-    # Calculate biological RSDs and counts
-    # Group over samples within each group
-    biol_group_levels = ['Compound', 'm/z', 'Retention time', 'Group']
-    biol_mean = tech_mean.groupby(level=biol_group_levels).mean()
-    biol_stddev = tech_mean.groupby(level=biol_group_levels).std().fillna(0)
+    # Biological RSDs and counts: over the samples in each group
+    by_group = tech_mean.groupby(level=0, sort=True)
+    biol_mean = by_group.mean()
+    biol_stddev = by_group.std().fillna(0)
     biol_rsd = (biol_stddev / biol_mean).fillna(0)
-    bioln = tech_mean.groupby(level=biol_group_levels).size()  # Number of samples per group
+    bioln = by_group.size()   # number of samples per group
+    group_tech_rsd = tech_rsd.groupby(level=0, sort=True).mean()
+    group_techn = techn.groupby(level=0, sort=True).mean()
 
-    # Prepare final DataFrame
+    def long(frame):
+        """Group x feature frame -> Series indexed (Compound, m/z, RT, Group)."""
+        try:
+            return frame.T.stack(future_stack=True)
+        except TypeError:
+            return frame.T.stack(dropna=False)
+
+    average = long(biol_mean)
+    groups = average.index.get_level_values('Group')
     msdata_errprop_mean = pd.DataFrame({
-        'average': biol_mean,
-        'biolRSD': biol_rsd,
-        'bioln': bioln,
-        'techRSD': tech_rsd.groupby(level=biol_group_levels).mean(),
-        'techn': techn.groupby(level=biol_group_levels).mean()
-    })
+        'average': average,
+        'biolRSD': long(biol_rsd),
+        'bioln': bioln.reindex(groups).values,
+        'techRSD': long(group_tech_rsd),
+        'techn': group_techn.reindex(groups).values,
+    }, index=average.index).sort_index()
 
     # Save results
     msdata_errprop_mean.to_csv(

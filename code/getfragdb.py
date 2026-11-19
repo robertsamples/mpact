@@ -156,14 +156,82 @@ def importfrag_v2(fragfile):
     return fragdb
 
 
-def importfrag(fragfile):
+def importfrag_mgf(fragfile):
     """
-    Imports a fragmentation database from an MSP file, detecting the file type automatically.
+    Imports a fragmentation database from an MS-DIAL-style MGF file.
+
+    Entries are keyed the same way as importfrag_v2 keys the matching MSP
+    export (rounded retention time and precursor m/z), so either file works
+    with the same peak table. Entries without a retention time are skipped.
 
     Parameters:
     -----------
     fragfile: str
-        The path to the MSP file.
+        The path to the MGF file.
+
+    Returns:
+    --------
+    fragmentation_db
+        A database of fragmentation ions.
+    """
+    # MGF keys and the MSP keys importfrag_v2 stores for the same values.
+    msp_keys = {'TITLE': 'NAME', 'PEPMASS': 'PRECURSORMZ', 'ION': 'PRECURSORTYPE',
+                'RTINMINUTES': 'RETENTIONTIME'}
+    fragdb = fragmentation_db([])
+    fragparams, pairlist = None, []
+    with open(fragfile, 'r') as fragmgf:
+        for line in fragmgf:
+            stripped = line.strip()
+            upper = stripped.upper()
+            if upper == 'BEGIN IONS':
+                fragparams, pairlist = {}, []
+            elif upper == 'END IONS':
+                if fragparams is not None:
+                    _add_mgf_entry(fragdb, fragparams, pairlist)
+                fragparams = None
+            elif fragparams is None or not stripped:
+                continue
+            elif '=' in stripped:
+                key, value = stripped.split('=', 1)
+                key = key.strip().upper()
+                value = value.strip()
+                if key == 'PEPMASS':
+                    value = value.split()[0] if value else value
+                elif key == 'RTINSECONDS':
+                    try:
+                        key, value = 'RTINMINUTES', str(float(value) / 60)
+                    except ValueError:
+                        continue
+                fragparams[msp_keys.get(key, key)] = value
+            else:
+                pair = stripped.split()
+                if len(pair) >= 2:
+                    try:
+                        pairlist.append([float(pair[0]), float(pair[1])])
+                    except ValueError:
+                        continue
+    return fragdb
+
+
+def _add_mgf_entry(fragdb, fragparams, pairlist):
+    """Store one parsed MGF entry under the importfrag_v2 name."""
+    try:
+        retention_time = float(fragparams['RETENTIONTIME'])
+        precursor_mz = fragparams['PRECURSORMZ']
+    except (KeyError, ValueError):
+        return
+    name = f"{round(retention_time, 3)}_{precursor_mz}"
+    fragdb.ions[name] = ion(fragparams, np.array(pairlist))
+
+
+def importfrag(fragfile):
+    """
+    Imports a fragmentation database from an MSP or MGF file, detecting the file type automatically.
+
+    Parameters:
+    -----------
+    fragfile: str
+        The path to the MSP or MGF file.
 
     Returns:
     --------
@@ -175,6 +243,9 @@ def importfrag(fragfile):
 
     with open(fragfile, 'r') as fragmsp:
         for line in fragmsp:
+            if line.strip().upper() == 'BEGIN IONS':
+                print('MGF file Detected')
+                return importfrag_mgf(fragfile)
             if line.upper().startswith('NAME:'):
                 if '|' in line:
                     has_pipe = True

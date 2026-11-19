@@ -112,3 +112,48 @@ def test_importfrag_on_real_example_files(name):
     for entry in db.ions.values():
         assert entry.pattern.size == 0 or (
             entry.pattern.ndim == 2 and entry.pattern.shape[1] == 2)
+
+
+# The same two entries as MSDIAL_MSP, as MS-DIAL writes them to an MGF.
+MSDIAL_MGF = (
+    "BEGIN IONS\n"
+    "TITLE=Unknown|ID=0|MZ=150.0267|RT=9.09||PEAKID=0|ISOTOPE=M+0\n"
+    "PEPMASS=150.0267\n"
+    "ION=[M+H]+\n"
+    "CHARGE=1+\n"
+    "RTINMINUTES=9.0898957\n"
+    "Num Peaks: 2\n"
+    "56.0500\t334\n"
+    "70.0600\t120\n"
+    "END IONS\n"
+    "\n"
+    "BEGIN IONS\n"
+    "TITLE=Unknown|ID=1|MZ=200.1000|RT=3.50||PEAKID=1|ISOTOPE=M+0\n"
+    "PEPMASS=200.1\n"
+    "ION=[M+H]+\n"
+    "CHARGE=1+\n"
+    "RTINMINUTES=3.5\n"
+    "Num Peaks: 1\n"
+    "99.0000\t50\n"
+    "END IONS\n"
+)
+
+
+def test_importfrag_reads_msdial_mgf_with_the_msp_keys(tmp_path):
+    msp = getfragdb.importfrag(_write(tmp_path, 'd.msp', MSDIAL_MSP))
+    mgf = getfragdb.importfrag(_write(tmp_path, 'd.mgf', MSDIAL_MGF))
+    assert set(mgf.ions) == set(msp.ions) == {'9.09_150.0267', '3.5_200.1'}
+    for name in msp.ions:
+        assert mgf.ions[name].pattern.tolist() == msp.ions[name].pattern.tolist()
+    assert mgf.ions['3.5_200.1'].fragparams['PRECURSORTYPE'] == '[M+H]+'
+
+
+def test_importfrag_mgf_seconds_and_missing_rt(tmp_path):
+    text = (
+        "BEGIN IONS\nTITLE=a\nPEPMASS=300.1 12345\nRTINSECONDS=90\n"
+        "100.0 10\nEND IONS\n"
+        "BEGIN IONS\nTITLE=no rt\nPEPMASS=400.2\n100.0 10\nEND IONS\n"
+    )
+    db = getfragdb.importfrag(_write(tmp_path, 's.mgf', text))
+    # PEPMASS keeps only the m/z; seconds become minutes; no RT, no entry.
+    assert list(db.ions) == ['1.5_300.1']
