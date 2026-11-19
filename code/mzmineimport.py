@@ -83,7 +83,7 @@ def reformat_metaboscape(file):
     data.to_csv(file, header = False, index = False) #saves formatted backup for later use This line might break on import of new files...
     data = pd.read_csv(file, sep = ',', header = [0,1,2], index_col = [0]) #imports data
     
-    data.index = data.index + data.groupby(level=0).cumcount().astype(str).replace('0','')
+    data.index = data.index.astype(str) + data.groupby(level=0).cumcount().astype(str).replace('0','')
     data.to_csv(file, header = True, index = True) #saves formatted backup for later use
 
 
@@ -211,5 +211,5 @@ def rename_duplicates(file):
     """
     data = pd.read_csv(file, sep = ',', header = [0,1,2], index_col = [0]) #imports data
     
-    data.index = data.index + data.groupby(level=0).cumcount().astype(str).replace('0','')
+    data.index = data.index.astype(str) + data.groupby(level=0).cumcount().astype(str).replace('0','')
     data.to_csv(file, header = True, index = True) #saves formatted backup for later use
